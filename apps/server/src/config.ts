@@ -47,7 +47,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     port: e.PORT,
     databaseUrl,
     publicUrl: e.PUBLIC_URL.replace(/\/$/, ''),
-    cookieSecure: e.PUBLIC_URL.startsWith('https://'),
     appSecret: e.APP_SECRET ?? 'dev-only-secret-dev-only-secret-dev-only',
     backupDir: e.BACKUP_DIR,
     backupKeep: e.BACKUP_KEEP,

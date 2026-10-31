@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createDb, runMigrations } from './db/client';
+import { currentSetupCode } from './routes/auth';
 
 // Runs against a real Postgres. Set TEST_DATABASE_URL (CI does; see README for local dev).
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -46,7 +47,10 @@ describe.skipIf(!databaseUrl)('API', () => {
   });
 
   it('runs first-time setup exactly once', async () => {
-    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needsSetup: true });
+    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({
+      needsSetup: true,
+      codeRequired: false,
+    });
 
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: owner });
     expect(res.statusCode).toBe(201);
@@ -63,9 +67,57 @@ describe.skipIf(!databaseUrl)('API', () => {
       expect.objectContaining({ name: 'My Business', role: 'owner' }),
     ]);
 
-    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needsSetup: false });
+    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({
+      needsSetup: false,
+      codeRequired: false,
+    });
     const again = await app.inject({ method: 'POST', url: '/api/setup', payload: owner });
     expect(again.statusCode).toBe(409);
+  });
+
+  it('asks for the setup code when setup is opened from outside the network', async () => {
+    const outside = { remoteAddress: '203.0.113.7' };
+    const status = await app.inject({ url: '/api/setup', ...outside });
+    expect(status.json()).toEqual({ needsSetup: true, codeRequired: true });
+
+    const without = await app.inject({
+      method: 'POST',
+      url: '/api/setup',
+      payload: owner,
+      ...outside,
+    });
+    expect(without.statusCode).toBe(403);
+    const wrong = await app.inject({
+      method: 'POST',
+      url: '/api/setup',
+      payload: { ...owner, setupCode: 'nope' },
+      ...outside,
+    });
+    expect(wrong.statusCode).toBe(403);
+
+    const right = await app.inject({
+      method: 'POST',
+      url: '/api/setup',
+      payload: { ...owner, setupCode: currentSetupCode() },
+      ...outside,
+    });
+    expect(right.statusCode).toBe(201);
+    expect((await app.inject({ url: '/api/setup', ...outside })).json()).toEqual({
+      needsSetup: false,
+      codeRequired: false,
+    });
+  });
+
+  it('marks the session cookie secure only for https visitors', async () => {
+    const plain = await app.inject({ method: 'POST', url: '/api/setup', payload: owner });
+    expect(String(plain.headers['set-cookie'])).not.toMatch(/Secure/);
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: owner.email, password: owner.password },
+      headers: { 'x-forwarded-proto': 'https' },
+    });
+    expect(String(login.headers['set-cookie'])).toMatch(/Secure/);
   });
 
   it('rejects weak setup input', async () => {

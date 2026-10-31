@@ -78,6 +78,12 @@ describe.skipIf(!databaseUrl)('privacy page and data deletion', () => {
     expect(res.body).not.toContain('<Likely>');
   });
 
+  it('serves terms of service', async () => {
+    const res = await app.inject({ url: '/terms' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Terms of service');
+  });
+
   it('deletes the person behind a valid request and reports status', async () => {
     const runtime = { db, channels: defaultChannels() };
     await receive(runtime, { workspaceId, channel: 'instagram', externalId: 'ig-123', text: 'hi' });

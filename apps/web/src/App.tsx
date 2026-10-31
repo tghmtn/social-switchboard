@@ -15,7 +15,7 @@ import { SimulatorPage } from './pages/SimulatorPage';
 
 type State =
   | { kind: 'loading' }
-  | { kind: 'setup' }
+  | { kind: 'setup'; codeRequired: boolean }
   | { kind: 'login' }
   | { kind: 'ready'; me: Me }
   | { kind: 'offline' };
@@ -25,8 +25,11 @@ export function App() {
 
   const load = useCallback(async () => {
     try {
-      const { needsSetup } = await api<{ needsSetup: boolean }>('/setup');
-      if (needsSetup) return setState({ kind: 'setup' });
+      const { needsSetup, codeRequired } = await api<{
+        needsSetup: boolean;
+        codeRequired?: boolean;
+      }>('/setup');
+      if (needsSetup) return setState({ kind: 'setup', codeRequired: Boolean(codeRequired) });
       setState({ kind: 'ready', me: await api<Me>('/me') });
     } catch (err) {
       setState(
@@ -43,7 +46,7 @@ export function App() {
     case 'loading':
       return null;
     case 'setup':
-      return <Setup onDone={load} />;
+      return <Setup onDone={load} codeRequired={state.codeRequired} />;
     case 'login':
       return <Login onDone={load} />;
     case 'offline':

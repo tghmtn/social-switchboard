@@ -1,5 +1,10 @@
 {
 	admin off
+	# Keep X-Forwarded-Proto/-For from proxies on private networks (the Cloudflare tunnel
+	# container), so the app knows a visitor came in over https and who they are.
+	servers {
+		trusted_proxies static private_ranges
+	}
 }
 
 # SITE_ADDRESS defaults to ":80" (plain HTTP behind HTTP_PORT).

@@ -2,7 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { ApiError, api } from '../api';
 import { AuthCard, Field, FormError } from '../ui';
 
-export function Setup({ onDone }: { onDone: () => void }) {
+export function Setup({ onDone, codeRequired }: { onDone: () => void; codeRequired: boolean }) {
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string>();
@@ -18,6 +18,10 @@ export function Setup({ onDone }: { onDone: () => void }) {
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) setErrors(err.fieldErrors());
       else if (err instanceof ApiError && err.status === 409) onDone();
+      else if (err instanceof ApiError && err.status === 403)
+        setErrors({
+          setupCode: 'That setup code doesn’t match. Check the server log for the current one.',
+        });
       else setFormError('Something went wrong. Check that the server is running and try again.');
     } finally {
       setBusy(false);
@@ -31,6 +35,16 @@ export function Setup({ onDone }: { onDone: () => void }) {
     >
       <form onSubmit={submit} className="space-y-4" noValidate>
         <FormError message={formError} />
+        {codeRequired && (
+          <Field
+            label="Setup code"
+            name="setupCode"
+            required
+            autoComplete="off"
+            error={errors.setupCode}
+            hint="You’re setting this up from outside your network. Run: docker compose logs app | grep 'Setup code'"
+          />
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="First name"

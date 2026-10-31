@@ -87,6 +87,35 @@ export const legalRoutes =
       );
     });
 
+    app.get('/terms', async (_req, reply) => {
+      const [ws] = await db
+        .select({ name: workspaces.name })
+        .from(workspaces)
+        .orderBy(asc(workspaces.createdAt))
+        .limit(1);
+      const who = esc(ws?.name ?? 'This service');
+      return reply.type('text/html; charset=utf-8').send(
+        page(
+          `Terms · ${ws?.name ?? 'Social Switchboard'}`,
+          `<div class="card">
+<h1>Terms of service</h1>
+<p class="muted">These terms cover messaging ${who} on Instagram or Messenger, where some replies are sent automatically.</p>
+<h2>Automated replies</h2>
+<p>When you comment a keyword, reply to a story or send us a message, you may get an automatic reply. It might ask a question, share a link or resource, or pass the conversation to a person. Replies are informational, and we can’t promise they’re complete or right for your situation.</p>
+<h2>What you share</h2>
+<p>Anything you tell us in the conversation, like your email address, is handled as described in our <a href="/privacy">privacy policy</a>. Only share what you’re comfortable sharing.</p>
+<h2>Using the service fairly</h2>
+<p>Don’t use the conversation to send spam, abuse, or anything unlawful. We may stop replying to accounts that do.</p>
+<h2>Links to other sites</h2>
+<p>Replies may link to other websites. Those sites have their own terms and privacy policies.</p>
+<h2>Changes and contact</h2>
+<p>We may update these terms; the current version is always at this address. Questions? ${config.privacyContact ? `Email <a href="mailto:${esc(config.privacyContact)}">${esc(config.privacyContact)}</a> or message` : 'Message'} us on Instagram.</p>
+<p class="muted">Social Switchboard ${esc(config.version)}</p>
+</div>`,
+        ),
+      );
+    });
+
     app.get('/data-deletion', async (req, reply) => {
       const { code } = z.object({ code: z.string().max(64).optional() }).parse(req.query);
       const [row] = code

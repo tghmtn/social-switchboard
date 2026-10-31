@@ -43,7 +43,13 @@ export type RouteDeps = AppDeps & { runtime: RuntimeDeps };
 
 export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logger'] = true) {
   const { config } = deps;
-  const app = Fastify({ logger, trustProxy: true, bodyLimit: 1024 * 1024 });
+  // Trust forwarding headers only from proxies on private networks (Caddy, the tunnel), so
+  // req.ip is the real visitor and req.protocol is "https" when they came through the tunnel.
+  const app = Fastify({
+    logger,
+    trustProxy: ['loopback', 'linklocal', 'uniquelocal'],
+    bodyLimit: 1024 * 1024,
+  });
 
   // JSON only. Combined with SameSite=Lax cookies this blocks cross-site form posts.
   app.removeContentTypeParser('text/plain');
@@ -63,7 +69,11 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
       return;
     }
     req.user = found.user;
-    reply.setCookie(SESSION_COOKIE, token, sessionCookieOptions(config, found.expiresAt));
+    reply.setCookie(
+      SESSION_COOKIE,
+      token,
+      sessionCookieOptions(req.protocol === 'https', found.expiresAt),
+    );
     // One workspace per install for now; the first membership is the active one.
     const [membership] = await deps.db
       .select({ id: workspaces.id, role: workspaceMembers.role, timeZone: workspaces.timeZone })

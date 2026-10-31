@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt } from 'drizzle-orm';
 import type { SessionUser } from '../app';
-import type { Config } from '../config';
 import type { Db } from '../db/client';
 import { sessions, users } from '../db/schema';
 
@@ -26,12 +25,13 @@ const RENEW_BELOW_MS = SESSION_TTL_MS / 2;
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
-export function sessionCookieOptions(config: Pick<Config, 'cookieSecure'>, expiresAt: Date) {
+/** `secure` follows how this request arrived: https through the tunnel, plain http on the home network. */
+export function sessionCookieOptions(secure: boolean, expiresAt: Date) {
   return {
     path: '/',
     httpOnly: true,
     sameSite: 'lax' as const,
-    secure: config.cookieSecure,
+    secure,
     expires: expiresAt,
   };
 }

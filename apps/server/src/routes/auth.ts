@@ -1,5 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AppDeps } from '../app';
 import { getDummyHash, hashPassword, verifyPassword } from '../auth/password';
@@ -11,6 +12,7 @@ import {
   sessionCookieOptions,
 } from '../auth/sessions';
 import { users, workspaceMembers, workspaces } from '../db/schema';
+import { isPrivateAddress } from '../net';
 
 // Arbitrary constant for pg_advisory_xact_lock, so two first-run requests can't both become owner.
 const SETUP_LOCK_KEY = 7_340_001;
@@ -25,27 +27,50 @@ const setupBody = z.object({
   email,
   password: z.string().min(10, 'Use at least 10 characters.').max(200),
   workspaceName: z.string().trim().min(1, 'Give your workspace a name.').max(100),
+  setupCode: z.string().trim().max(32).optional(),
 });
 const loginBody = z.object({ email, password: z.string().min(1).max(200) });
 
 const authRateLimit = { rateLimit: { max: 10, timeWindow: '1 minute' } };
 
+/** One-time code for first-run setup from outside the home network; made on first need. */
+let setupCode: string | undefined;
+export const currentSetupCode = () => setupCode;
+
 export const authRoutes =
   ({ db, config }: AppDeps): FastifyPluginAsync =>
   async (app) => {
-    const startSession = async (userId: string) => {
+    const startSession = async (userId: string, req: FastifyRequest) => {
       const { token, expiresAt } = await createSession(db, userId);
-      return [token, sessionCookieOptions(config, expiresAt)] as const;
+      return [token, sessionCookieOptions(req.protocol === 'https', expiresAt)] as const;
+    };
+    const needsSetup = async () => !(await db.select({ id: users.id }).from(users).limit(1))[0];
+
+    // From the home network anyone can run first-time setup. From outside (e.g. through the
+    // tunnel), they also need the one-time code this server prints to its log, so a stranger who
+    // finds a fresh install can't claim it.
+    const codeRequired = (req: FastifyRequest) => {
+      if (isPrivateAddress(req.ip)) return false;
+      if (!setupCode) {
+        setupCode = randomBytes(6).toString('base64url');
+        req.log.warn(
+          `First-time setup was opened from outside your network. Setup code: ${setupCode}`,
+        );
+      }
+      return true;
     };
 
-    app.get('/setup', async () => {
-      const [anyUser] = await db.select({ id: users.id }).from(users).limit(1);
-      return { needsSetup: !anyUser };
+    app.get('/setup', async (req) => {
+      const open = await needsSetup();
+      return { needsSetup: open, codeRequired: open && codeRequired(req) };
     });
 
     // First run only: creates the owner account and the first workspace.
     app.post('/setup', { config: authRateLimit }, async (req, reply) => {
       const body = setupBody.parse(req.body);
+      if (codeRequired(req) && body.setupCode !== setupCode) {
+        return reply.code(403).send({ error: 'setup_code_required' });
+      }
       const passwordHash = await hashPassword(body.password);
 
       const user = await db.transaction(async (tx) => {
@@ -79,7 +104,7 @@ export const authRoutes =
       });
       if (!user) return reply.code(409).send({ error: 'already_set_up' });
 
-      reply.setCookie(SESSION_COOKIE, ...(await startSession(user.id)));
+      reply.setCookie(SESSION_COOKIE, ...(await startSession(user.id, req)));
       return reply.code(201).send({ user: publicUser(user) });
     });
 
@@ -89,7 +114,7 @@ export const authRoutes =
       const ok = await verifyPassword(body.password, user?.passwordHash ?? (await getDummyHash()));
       if (!user || !ok) return reply.code(401).send({ error: 'invalid_credentials' });
 
-      reply.setCookie(SESSION_COOKIE, ...(await startSession(user.id)));
+      reply.setCookie(SESSION_COOKIE, ...(await startSession(user.id, req)));
       return { user: publicUser(user) };
     });
 
