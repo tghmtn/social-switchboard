@@ -57,7 +57,7 @@ The secret is how this server finishes logging you in and checks that messages r
 **Where in Meta:** left sidebar → **Use cases** → **Customize** next to **Manage messaging & content on Instagram** → **API setup with Unified login** → **1. Configure your app**.
 
 1. Click **Create configuration** (or **Create another configuration**). Keep the defaults: a **system-user access token** that **never expires**, with **Instagram accounts** as the asset.
-2. **Permissions:** keep **instagram_basic**, **instagram_manage_comments** and **instagram_manage_messages**. You can remove the ads permissions and **instagram_content_publish**; Social Switchboard doesn't use them, and fewer permissions make App Review easier.
+2. **Permissions:** keep **instagram_basic**, **instagram_manage_comments** and **instagram_manage_messages**. Remove **ads_management**, **ads_read** and **instagram_content_publish**: Social Switchboard doesn't use them, the ads ones make Meta's login ask you to pick or create an ad account, and fewer permissions make App Review easier.
 3. Under **Register a new redirect URL**, paste `{{OAUTH_REDIRECT}}` and click **Save**. It then shows under **Select the registered URL**.
 4. Under **Login URL**, click **Copy** and paste it below. It isn't secret: it's the address of Meta's sign-in page for your app.
 
@@ -77,13 +77,27 @@ Until your app passes App Review, only accounts with a role on it can connect, e
 
 Skip **Generate token**: the next step gets a token straight into Social Switchboard, so it never sits on your clipboard. **Webhook Subscription** still says **Off** for now; that's expected.
 
+## step: portfolio | Add your Instagram account to your business portfolio
+
+**Where:** business.facebook.com/settings (Meta's business settings, not the developer dashboard).
+
+Meta's login only offers Instagram accounts that belong to the business portfolio that owns your app. Without this, it says "Instagram Pro account required" and the account list is empty. ("Pro" just means Creator or Business, which you set up in the first step.)
+
+1. Make sure the portfolio at the top left is the one you picked when creating the app.
+2. Open **Accounts** → **Instagram accounts** and click **Add**. Newer versions call this **Business assets** → **Add assets** → **Instagram account**.
+3. Log in to your Instagram account when asked, and confirm.
+
+The account then shows under Instagram accounts. Your posts and followers don't change.
+
 ## step: connect | Connect your Instagram account
 
 **Where:** right here. This does what Meta's **Generate token** button does.
 
 Click **Connect Instagram** below. Meta asks you to log in, then to choose your **business portfolio** and your **Instagram account**, and to approve the permissions. Keep everything ticked. Then you'll come back here.
 
-If it says no Instagram account was shared, connect again and make sure the account is ticked. If your account isn't in the list at all, add it to your portfolio first: **business.facebook.com → Settings → Accounts → Instagram accounts → Add**.
+If it also asks for an **Ad Account**, don't create one. That question comes from ads permissions; remove them from your configuration (the login step), then connect again.
+
+If it says no Instagram account was shared, connect again and make sure the account is ticked. If the list is empty or says "Instagram Pro account required", do the portfolio step above first.
 
 ## step: webhooks | Turn on webhooks
 

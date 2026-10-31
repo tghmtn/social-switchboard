@@ -130,6 +130,7 @@ export function Channels() {
     login: Boolean(s?.loginMode),
     credentials: Boolean(s && canConnect(s)),
     tester: connected.length > 0,
+    portfolio: connected.length > 0,
     webhooks: Boolean(s?.webhookVerifiedAt),
     connect: connected.length > 0,
     publish: Boolean(s?.lastWebhookAt && firstConnectedAt && s.lastWebhookAt > firstConnectedAt),
