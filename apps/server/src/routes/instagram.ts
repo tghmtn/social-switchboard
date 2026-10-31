@@ -64,6 +64,34 @@ export const instagramPublicRoutes =
       );
 
     /** Meta checks the webhook URL by asking us to echo a challenge back with our verify token. */
+    /** Asks Meta to send each connected account's events to this app. Safe to repeat. */
+    const subscribeConnected = async (workspaceId: string) => {
+      const accounts = await db
+        .select()
+        .from(instagramAccounts)
+        .where(
+          and(
+            eq(instagramAccounts.workspaceId, workspaceId),
+            eq(instagramAccounts.status, 'connected'),
+          ),
+        );
+      for (const a of accounts) {
+        const token = decryptOptional(config.appSecret, a.accessTokenEnc);
+        if (!token) continue;
+        await graph.subscribe(
+          a.igUserId,
+          token,
+          a.apiHost === 'facebook' ? 'facebook' : 'instagram',
+        );
+        if (a.statusDetail?.startsWith('Connected, but subscribing')) {
+          await db
+            .update(instagramAccounts)
+            .set({ statusDetail: null })
+            .where(eq(instagramAccounts.id, a.id));
+        }
+      }
+    };
+
     app.get('/instagram/webhook', async (req, reply) => {
       const q = req.query as Record<string, string | undefined>;
       if (q['hub.mode'] !== 'subscribe' || !q['hub.verify_token'] || !q['hub.challenge'])
@@ -74,6 +102,13 @@ export const instagramPublicRoutes =
         .where(eq(metaApps.webhookVerifyToken, q['hub.verify_token']))
         .returning({ workspaceId: metaApps.workspaceId });
       if (!row) return reply.code(403).send('verify token does not match');
+      // Accounts connected before webhooks were set up: switch their events on now.
+      void subscribeConnected(row.workspaceId).catch((err) =>
+        req.log.warn(
+          { err: String(err) },
+          'subscribing accounts after webhook verification failed',
+        ),
+      );
       return reply.type('text/plain').send(q['hub.challenge']);
     });
 

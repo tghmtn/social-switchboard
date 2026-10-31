@@ -284,6 +284,18 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       subscribed_fields: expect.stringContaining('comments'),
     });
 
+    // Webhooks set up after connecting (Meta's own order): verifying them re-subscribes the account.
+    calls = [];
+    const verify = await app.inject({
+      url: `/api/instagram/webhook?hub.mode=subscribe&hub.verify_token=${saved.body.webhookVerifyToken}&hub.challenge=7`,
+    });
+    expect(verify.body).toBe('7');
+    for (let i = 0; i < 50 && !calls.some((c) => c.url.pathname.endsWith('/subscribed_apps')); i++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls.find((c) => c.url.pathname.endsWith('/subscribed_apps'))?.url.host).toBe(
+      'graph.facebook.com',
+    );
+
     const media = await call<{ media: { id: string }[] }>('GET', '/api/instagram/media');
     expect(media.body.media.map((m) => m.id)).toEqual(['m1']);
 

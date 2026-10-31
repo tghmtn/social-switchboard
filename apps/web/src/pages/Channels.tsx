@@ -121,12 +121,13 @@ export function Channels() {
 
   const connected = s?.accounts.filter((a) => a.status === 'connected') ?? [];
   const firstConnectedAt = connected.map((a) => a.connectedAt).sort()[0];
-  const appMade = Boolean(s?.loginMode);
+  const appMade = Boolean(s?.loginMode || s?.hasFacebookAppSecret);
   const proven: Record<string, boolean> = {
     account: connected.length > 0,
     developer: appMade,
     app: appMade,
-    login: appMade,
+    basics: Boolean(s?.hasFacebookAppSecret),
+    login: Boolean(s?.loginMode),
     credentials: Boolean(s && canConnect(s)),
     tester: connected.length > 0,
     webhooks: Boolean(s?.webhookVerifiedAt),
@@ -330,8 +331,12 @@ function StepExtras({
 }): ReactNode {
   const connected = s.accounts.filter((a) => a.status === 'connected');
   switch (step) {
-    case 'credentials':
-      return <CredentialsForm settings={s} onSaved={onSaved} />;
+    case 'basics':
+      return <CredentialsForm settings={s} onSaved={onSaved} secret />;
+    case 'login':
+      return <CredentialsForm settings={s} onSaved={onSaved} login />;
+    case 'credentials': // guides from before the steps followed Meta's page
+      return <CredentialsForm settings={s} onSaved={onSaved} secret login />;
     case 'webhooks':
       return (
         <Check
@@ -381,12 +386,17 @@ function canConnect(s: InstagramSettings) {
 
 const SAVED = 'Saved. Paste a new one to replace it.';
 
+/** Saves what Meta shows on the current step: the app secret, the Login URL, or both. */
 function CredentialsForm({
   settings: s,
   onSaved,
+  secret = false,
+  login = false,
 }: {
   settings: InstagramSettings;
   onSaved: () => void;
+  secret?: boolean;
+  login?: boolean;
 }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
@@ -411,7 +421,9 @@ function CredentialsForm({
       onSaved();
     } catch (err) {
       setErrors(
-        err instanceof ApiError ? err.fieldErrors() : { loginUrl: 'Couldn’t save. Try again.' },
+        err instanceof ApiError
+          ? err.fieldErrors()
+          : { [login ? 'loginUrl' : 'facebookAppSecret']: 'Couldn’t save. Try again.' },
       );
     } finally {
       setBusy(false);
@@ -420,62 +432,72 @@ function CredentialsForm({
 
   return (
     <form onSubmit={save} className="grid gap-3 border-2 border-line p-4" autoComplete="off">
-      <Field
-        label="Login URL"
-        name="loginUrl"
-        inputMode="url"
-        placeholder={
-          s.loginUrl
-            ? `Saved (configuration ${s.configId}). Paste a new one to replace it.`
-            : 'https://www.facebook.com/dialog/oauth?client_id=…&config_id=…'
-        }
-        error={errors.loginUrl}
-        hint="API setup with Unified login → Configure your app → Login URL → Copy."
-      />
-      {s.loginRedirectMatches === false && (
-        <p className="border-2 border-accent bg-surface px-3 py-2 text-[13px]">
-          That Login URL sends people to a different address after they log in. In the same
-          configuration, register <code>{s.urls.oauthRedirect}</code> as a redirect URL.
-        </p>
+      {login && (
+        <>
+          <Field
+            label="Login URL"
+            name="loginUrl"
+            inputMode="url"
+            placeholder={
+              s.loginUrl
+                ? `Saved (configuration ${s.configId}). Paste a new one to replace it.`
+                : 'https://www.facebook.com/dialog/oauth?client_id=…&config_id=…'
+            }
+            error={errors.loginUrl}
+          />
+          {s.loginRedirectMatches === false && (
+            <p className="border-2 border-accent bg-surface px-3 py-2 text-[13px]">
+              That Login URL sends people to a different address after they log in. In the same
+              configuration, register <code>{s.urls.oauthRedirect}</code> as a redirect URL.
+            </p>
+          )}
+        </>
       )}
-      <Field
-        label="Meta app secret"
-        name="facebookAppSecret"
-        type="password"
-        placeholder={s.hasFacebookAppSecret ? SAVED : ''}
-        error={errors.facebookAppSecret}
-        hint="App settings → Basic → App secret → Show. Used to finish logging in and to check that messages really come from Meta."
-      />
-      <details className="border-2 border-line px-3 py-2">
-        <summary className="cursor-pointer text-[14px] font-bold">
-          Older app with “API setup with Instagram login”?
-        </summary>
-        <div className="mt-3 grid gap-3">
-          <p className="text-[13px] text-muted">
-            Apps made before mid-2026 may have this instead of Unified login. Copy the ID and secret
-            from that page. You still need the Meta app secret above.
-          </p>
-          <Field
-            label="Instagram app ID"
-            name="instagramAppId"
-            inputMode="numeric"
-            placeholder={s.instagramAppId ?? 'e.g. 1234567890123456'}
-            error={errors.instagramAppId}
-          />
-          <Field
-            label="Instagram app secret"
-            name="instagramAppSecret"
-            type="password"
-            placeholder={s.hasInstagramAppSecret ? SAVED : ''}
-            error={errors.instagramAppSecret}
-          />
-        </div>
-      </details>
+      {secret && (
+        <Field
+          label="Meta app secret"
+          name="facebookAppSecret"
+          type="password"
+          placeholder={s.hasFacebookAppSecret ? SAVED : ''}
+          error={errors.facebookAppSecret}
+        />
+      )}
+      {login && (
+        <details className="border-2 border-line px-3 py-2">
+          <summary className="cursor-pointer text-[14px] font-bold">
+            Older app with “API setup with Instagram login”?
+          </summary>
+          <div className="mt-3 grid gap-3">
+            <p className="text-[13px] text-muted">
+              Apps made before mid-2026 may have this instead of Unified login. Copy the ID and
+              secret from that page instead of a Login URL.
+            </p>
+            <Field
+              label="Instagram app ID"
+              name="instagramAppId"
+              inputMode="numeric"
+              placeholder={s.instagramAppId ?? 'e.g. 1234567890123456'}
+              error={errors.instagramAppId}
+            />
+            <Field
+              label="Instagram app secret"
+              name="instagramAppSecret"
+              type="password"
+              placeholder={s.hasInstagramAppSecret ? SAVED : ''}
+              error={errors.instagramAppSecret}
+            />
+          </div>
+        </details>
+      )}
       <div className="flex items-center gap-3">
         <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
           Save
         </button>
-        {saved && <span className="text-[13px] font-bold text-success">Saved and encrypted</span>}
+        {saved && (
+          <span className="text-[13px] font-bold text-success">
+            {secret ? 'Saved and encrypted' : 'Saved'}
+          </span>
+        )}
       </div>
     </form>
   );
