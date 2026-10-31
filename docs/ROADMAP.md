@@ -183,7 +183,8 @@ Each phase ends with something you can actually use.
 - **Borrow from:** OpenReply (Meta client, webhook handling, rate limiter, follow gate, setup docs) and ChatbotX `integrations/instagram`.
 
 - **"Connect Instagram" wizard on the Channels page (moved here from Phase 8, 2026-10-31).** Most deployers will never get through Meta's dashboard alone, so the app walks them through it:
-  - every step with the exact clicks
+  - every step with the exact clicks, starting before Meta: switching the Instagram account to Creator/Business, registering as a Meta developer, creating the app, adding and accepting the tester invite
+  - checks the app can do for itself, like reading the connected account's type (personal accounts get walked back to the switch step)
   - the redirect, webhook, privacy, terms and data-deletion URLs pre-filled for this install, with copy buttons
   - app IDs and secrets pasted into the app and stored encrypted, not edited into `.env`
   - a live check after each step: "Meta reached your webhook", "connected as @account", or a plain-language reason when it fails (tester invite not accepted, app not published, another tool owns the conversations)
