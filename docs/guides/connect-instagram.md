@@ -56,7 +56,7 @@ In your app, open **Use cases**, then **Customize** next to **Manage messaging &
 ## step: credentials | Paste your Login URL and app secret
 
 - **Login URL:** at the bottom of **1. Configure your app**, click **Copy** next to **Login URL**.
-- **Meta app secret:** **App settings → Basic → App secret**, then **Show**.
+- **Meta app secret:** it's not on the API setup page. In the left sidebar of your app's dashboard, click **App settings**, then **Basic**. Next to **App secret**, click **Show**. Meta may ask for your Facebook password first. Copy the secret into the form below.
 
 They're stored encrypted on your server, and Social Switchboard never shows the secret again. The Login URL isn't secret: it's the address of Meta's sign-in page for your app.
 
