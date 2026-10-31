@@ -74,6 +74,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   let app: FastifyInstance;
   let cookies: Record<string, string> = {};
   let calls: Call[] = [];
+  let assignedEmpty = false;
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -90,7 +91,14 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     if (url.host === 'graph.facebook.com') {
       if (path === '/oauth/access_token') return json({ access_token: 'system-user-token' });
       if (path === '/me/assigned_instagram_accounts')
-        return json({ data: [{ id: IG_ID, username: 'tgunified', name: 'TG' }] });
+        return json({
+          data: assignedEmpty ? [] : [{ id: IG_ID, username: 'tgunified', name: 'TG' }],
+        });
+      if (path === '/debug_token')
+        return json({
+          data: { granular_scopes: [{ scope: 'instagram_basic', target_ids: [IG_ID] }] },
+        });
+      if (path === `/${IG_ID}`) return json({ id: IG_ID, username: 'tgfromdebug' });
       if (path === `/${IG_ID}/media`)
         return json({ data: [{ id: 'm1', media_type: 'IMAGE', caption: 'Hi', media_url: 'x' }] });
     }
@@ -161,6 +169,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   });
   beforeEach(async () => {
     calls = [];
+    assignedEmpty = false;
     await db.execute(sql`truncate workspaces, users, webhook_events cascade`);
     const res = await app.inject({
       method: 'POST',
@@ -339,6 +348,23 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(sent?.url.host).toBe('graph.facebook.com');
     expect(sent?.url.pathname).toMatch(new RegExp(`/${IG_ID}/messages$`));
     expect(sent?.body).toEqual({ recipient: { comment_id: 'c5' }, message: { text: 'Hi!' } });
+  });
+
+  it('finds the account from the token’s granted targets when nothing is assigned', async () => {
+    assignedEmpty = true;
+    await call('PUT', '/api/instagram/settings', {
+      loginUrl:
+        'https://www.facebook.com/dialog/oauth?client_id=1076000000000001&config_id=2900000000000001',
+      facebookAppSecret: FB_SECRET,
+    });
+    const start = new URL(String((await call('GET', '/api/instagram/connect')).headers.location));
+    const back = await call(
+      'GET',
+      `/api/instagram/callback?code=abc&state=${encodeURIComponent(start.searchParams.get('state') ?? '')}`,
+    );
+    expect(String(back.headers.location)).toBe('/channels?connected=tgfromdebug');
+    const debug = calls.find((c) => c.url.pathname.endsWith('/debug_token'));
+    expect(debug?.url.searchParams.get('access_token')).toBe(`1076000000000001|${FB_SECRET}`);
   });
 
   it('rejects unsigned webhooks', async () => {

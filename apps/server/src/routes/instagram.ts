@@ -247,7 +247,15 @@ export const instagramPublicRoutes =
           if (!metaAppId || !metaAppSecret)
             return back({ error: 'Paste your Login URL and Meta app secret first.' });
           const token = await graph.exchangeUnifiedCode(metaAppId, metaAppSecret, redirect, q.code);
-          const accounts = await graph.assignedInstagramAccounts(token.accessToken);
+          const { accounts, notes } = await graph.findInstagramAccounts(
+            token.accessToken,
+            metaAppId,
+            metaAppSecret,
+          );
+          req.log.info(
+            { notes, found: accounts.length },
+            'unified login: looked for Instagram accounts',
+          );
           if (accounts.length === 0) {
             return back({
               error:

@@ -166,6 +166,82 @@ export async function assignedInstagramAccounts(token: string): Promise<Assigned
   }
 }
 
+/**
+ * Which Instagram accounts a Unified login token can act for. Meta doesn't document one way to
+ * list them, so we try, in order: the system user's assigned accounts, the token's granted
+ * targets (debug_token), and Pages with a linked Instagram account. `notes` records what each
+ * attempt returned (counts and errors, never tokens) for the logs.
+ */
+export async function findInstagramAccounts(
+  token: string,
+  metaAppId: string,
+  metaAppSecret: string,
+) {
+  const notes: string[] = [];
+  const found = new Map<string, AssignedAccount>();
+  const attempt = async (label: string, list: () => Promise<AssignedAccount[]>) => {
+    try {
+      const accounts = await list();
+      notes.push(`${label}: ${accounts.length}`);
+      for (const a of accounts) found.set(a.id, { ...found.get(a.id), ...a });
+    } catch (err) {
+      notes.push(
+        `${label}: ${err instanceof MetaError ? `error ${err.code} ${err.message}` : String(err)}`,
+      );
+    }
+  };
+  const get = async <T>(path: string, params: Record<string, string>, auth = true) => {
+    const url = new URL(`${base('facebook')}/${path}`);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    return call<T>(await http(url, auth ? { headers: bearer(token) } : undefined));
+  };
+
+  await attempt('assigned_instagram_accounts', () => assignedInstagramAccounts(token));
+  if (found.size === 0) {
+    await attempt('debug_token', async () => {
+      const data = await get<{
+        data?: { granular_scopes?: { scope: string; target_ids?: string[] }[] };
+      }>(
+        'debug_token',
+        { input_token: token, access_token: `${metaAppId}|${metaAppSecret}` },
+        false,
+      );
+      const ids = (data.data?.granular_scopes ?? [])
+        .filter((g) => g.scope.startsWith('instagram_'))
+        .flatMap((g) => g.target_ids ?? []);
+      return [...new Set(ids)].map((id) => ({ id }));
+    });
+  }
+  if (found.size === 0) {
+    await attempt('me/accounts', async () => {
+      const data = await get<{ data?: { instagram_business_account?: AssignedAccount }[] }>(
+        'me/accounts',
+        {
+          fields: 'instagram_business_account{id,username,name,profile_picture_url}',
+        },
+      );
+      return (data.data ?? []).flatMap((p) =>
+        p.instagram_business_account ? [p.instagram_business_account] : [],
+      );
+    });
+  }
+
+  const accounts = await Promise.all(
+    [...found.values()].map(async (a) => {
+      if (a.username) return a;
+      try {
+        return {
+          ...a,
+          ...(await get<AssignedAccount>(a.id, { fields: 'username,name,profile_picture_url' })),
+        };
+      } catch {
+        return a;
+      }
+    }),
+  );
+  return { accounts, notes };
+}
+
 export async function exchangeCode(
   appId: string,
   appSecret: string,
