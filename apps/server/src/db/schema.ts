@@ -408,8 +408,15 @@ export const metaApps = pgTable('meta_apps', {
   workspaceId: uuid('workspace_id')
     .primaryKey()
     .references(() => workspaces.id, { onDelete: 'cascade' }),
+  /**
+   * Unified login (all newer Meta apps): the Login URL Meta generates for the app's login
+   * configuration. It carries the Meta app ID (client_id) and config_id; neither is secret.
+   */
+  loginUrl: text('login_url'),
+  /** Older apps only: "API setup with Instagram login". */
   instagramAppId: text('instagram_app_id'),
   instagramAppSecretEnc: text('instagram_app_secret_enc'),
+  /** The Meta app secret (App settings → Basic). Signs webhooks; Unified login's token exchange uses it. */
   facebookAppSecretEnc: text('facebook_app_secret_enc'),
   /** Random string Meta echoes back when it verifies the webhook URL. */
   webhookVerifyToken: text('webhook_verify_token').notNull(),
@@ -430,6 +437,8 @@ export const instagramAccounts = pgTable(
     name: text('name'),
     profilePictureUrl: text('profile_picture_url'),
     accountType: text('account_type'),
+    /** Which API this account's token works with: graph.instagram.com or graph.facebook.com (Unified login). */
+    apiHost: text('api_host').notNull().default('instagram'),
     accessTokenEnc: text('access_token_enc').notNull(),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     status: text('status').notNull().default('connected'),

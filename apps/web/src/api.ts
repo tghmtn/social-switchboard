@@ -168,6 +168,12 @@ export type InstagramSettings = {
     privacy: string;
     terms: string;
   };
+  /** Which way Connect logs in: Unified login (newer apps) or Instagram login (older ones). */
+  loginMode: 'unified' | 'instagram' | null;
+  loginUrl: string | null;
+  metaAppId: string | null;
+  configId: string | null;
+  loginRedirectMatches: boolean | null;
   instagramAppId: string | null;
   hasInstagramAppSecret: boolean;
   hasFacebookAppSecret: boolean;

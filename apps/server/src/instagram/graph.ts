@@ -1,9 +1,21 @@
-// Instagram API with Instagram Login: OAuth, tokens, profile, messaging and comments.
-// Endpoints and their quirks adapted from OpenReply (MIT), lib/meta/client.ts and
-// lib/meta/oauth.ts; see THIRD_PARTY_NOTICES.md.
+// Instagram's APIs: OAuth, tokens, accounts, messaging and comments, for both setups Meta offers:
+// - Unified login (every newer Meta app): Facebook Login for Business with a config_id, a business
+//   system-user token, and calls to graph.facebook.com against the Instagram account id.
+// - Instagram login (older apps): instagram.com OAuth, 60-day user tokens, graph.instagram.com.
+// Instagram-login endpoints and their quirks adapted from OpenReply (MIT), lib/meta/client.ts and
+// lib/meta/oauth.ts; see THIRD_PARTY_NOTICES.md. Unified login follows Meta's Instagram Platform docs.
 
-export const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION ?? 'v25.0';
-const GRAPH = () => `https://graph.instagram.com/${GRAPH_VERSION}`;
+/** Which API an account's token works with. */
+export type Host = 'instagram' | 'facebook';
+const VERSIONS: Record<Host, string> = {
+  instagram: process.env.META_INSTAGRAM_API_VERSION ?? 'v25.0',
+  facebook: process.env.META_GRAPH_API_VERSION ?? 'v26.0',
+};
+const base = (host: Host) =>
+  host === 'facebook'
+    ? `https://graph.facebook.com/${VERSIONS.facebook}`
+    : `https://graph.instagram.com/${VERSIONS.instagram}`;
+const GRAPH = () => base('instagram');
 // Instagram Login authorizes on www.instagram.com (the old api.instagram.com/oauth/authorize
 // belonged to the retired Basic Display API and now 404s); the code exchange stays on api.
 const AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize';
@@ -84,6 +96,76 @@ export function authorizeUrl(appId: string, redirectUri: string, state: string) 
   return `${AUTHORIZE_URL}?${params}`;
 }
 
+/**
+ * Unified login: Meta generates the Login URL (with client_id and config_id); we only set our
+ * redirect and a signed state on it.
+ */
+export function unifiedAuthorizeUrl(loginUrl: string, redirectUri: string, state: string) {
+  const url = new URL(loginUrl);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('state', state);
+  if (!url.searchParams.has('response_type')) url.searchParams.set('response_type', 'code');
+  // We open it as a whole page, not the popup the copied URL asks for.
+  if (url.searchParams.get('display') === 'popup') url.searchParams.set('display', 'page');
+  return url.toString();
+}
+
+/** Unified login code → business system-user token, using the Meta app ID and secret. */
+export async function exchangeUnifiedCode(
+  metaAppId: string,
+  metaAppSecret: string,
+  redirectUri: string,
+  code: string,
+) {
+  const url = new URL(`${base('facebook')}/oauth/access_token`);
+  url.searchParams.set('client_id', metaAppId);
+  url.searchParams.set('client_secret', metaAppSecret);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('code', code);
+  const data = await call<{ access_token: string; expires_in?: number }>(await http(url));
+  return { accessToken: data.access_token, expiresIn: data.expires_in };
+}
+
+export type AssignedAccount = {
+  id: string;
+  username?: string;
+  name?: string;
+  profile_picture_url?: string;
+};
+
+/** The Instagram accounts the business shared during Unified login (`/me` is the system user). */
+export async function assignedInstagramAccounts(token: string): Promise<AssignedAccount[]> {
+  const list = async (fields?: string) => {
+    const url = new URL(`${base('facebook')}/me/assigned_instagram_accounts`);
+    if (fields) url.searchParams.set('fields', fields);
+    return (
+      (await call<{ data?: AssignedAccount[] }>(await http(url, { headers: bearer(token) })))
+        .data ?? []
+    );
+  };
+  try {
+    return await list('id,username,name,profile_picture_url');
+  } catch (err) {
+    if (!(err instanceof MetaError && err.code === 100)) throw err;
+    // Fields not offered on this edge: list ids, then ask each account for its profile.
+    const ids = await list();
+    return Promise.all(
+      ids.map(async (a) => {
+        try {
+          const url = new URL(`${base('facebook')}/${a.id}`);
+          url.searchParams.set('fields', 'username,name,profile_picture_url');
+          return {
+            ...a,
+            ...(await call<AssignedAccount>(await http(url, { headers: bearer(token) }))),
+          };
+        } catch {
+          return a;
+        }
+      }),
+    );
+  }
+}
+
 export async function exchangeCode(
   appId: string,
   appSecret: string,
@@ -150,13 +232,16 @@ export async function me(token: string): Promise<Profile> {
 }
 
 /** Tells Instagram to send this account's comment and message events to our webhook. */
-export async function subscribe(igUserId: string, token: string) {
+export async function subscribe(igUserId: string, token: string, host: Host = 'instagram') {
   const attempt = async (fields: string[]) =>
     call<{ success: boolean }>(
-      await http(`${GRAPH()}/${igUserId}/subscribed_apps`, {
+      await http(`${base(host)}/${igUserId}/subscribed_apps`, {
         method: 'POST',
         headers: bearer(token),
-        body: JSON.stringify({ subscribed_fields: fields }),
+        // graph.facebook.com documents a comma-separated list; graph.instagram.com takes an array.
+        body: JSON.stringify({
+          subscribed_fields: host === 'facebook' ? fields.join(',') : fields,
+        }),
       }),
     );
   try {
@@ -167,9 +252,13 @@ export async function subscribe(igUserId: string, token: string) {
 }
 
 /** A person's username, by the id they message us from. Best effort. */
-export async function lookupUsername(token: string, igsid: string): Promise<string | undefined> {
+export async function lookupUsername(
+  token: string,
+  igsid: string,
+  host: Host = 'instagram',
+): Promise<string | undefined> {
   try {
-    const url = new URL(`${GRAPH()}/${igsid}`);
+    const url = new URL(`${base(host)}/${igsid}`);
     url.searchParams.set('fields', 'username,name');
     const data = await call<{ username?: string; name?: string }>(
       await http(url, { headers: bearer(token) }),
@@ -187,8 +276,9 @@ export async function sendMessage(
   token: string,
   recipient: Recipient,
   message: object,
+  host: Host = 'instagram',
 ) {
-  const res = await http(`${GRAPH()}/${igUserId}/messages`, {
+  const res = await http(`${base(host)}/${igUserId}/messages`, {
     method: 'POST',
     headers: bearer(token),
     body: JSON.stringify({ recipient, message }),
@@ -196,8 +286,13 @@ export async function sendMessage(
   return call<{ recipient_id?: string; message_id?: string }>(res);
 }
 
-export async function replyToComment(commentId: string, token: string, text: string) {
-  const res = await http(`${GRAPH()}/${commentId}/replies`, {
+export async function replyToComment(
+  commentId: string,
+  token: string,
+  text: string,
+  host: Host = 'instagram',
+) {
+  const res = await http(`${base(host)}/${commentId}/replies`, {
     method: 'POST',
     headers: bearer(token),
     body: JSON.stringify({ message: text }),
@@ -216,8 +311,14 @@ export type Media = {
   timestamp?: string;
 };
 
-export async function recentMedia(token: string, limit = 30): Promise<Media[]> {
-  const url = new URL(`${GRAPH()}/me/media`);
+/** Recent posts. With Unified login `/me` is the system user, so ask the account itself. */
+export async function recentMedia(
+  token: string,
+  host: Host = 'instagram',
+  igUserId?: string,
+  limit = 30,
+): Promise<Media[]> {
+  const url = new URL(`${base(host)}/${host === 'facebook' && igUserId ? igUserId : 'me'}/media`);
   url.searchParams.set(
     'fields',
     'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp',

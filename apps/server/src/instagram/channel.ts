@@ -3,7 +3,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { instagramAccounts, messages, type OutboundContent } from '../db/schema';
 import type { ChannelAdapter, SendResult } from '../runtime/channels';
-import { MetaError, replyToComment, sendMessage } from './graph';
+import { type Host, MetaError, replyToComment, sendMessage } from './graph';
 import { accountFor, decryptOptional } from './settings';
 
 const DAY = 24 * 3_600_000;
@@ -99,6 +99,7 @@ export function instagramChannel(db: Db, appSecret: string): ChannelAdapter {
             'The Instagram connection needs to be redone (its key changed). Reconnect on the Channels page.',
         };
 
+      const host: Host = account.apiHost === 'facebook' ? 'facebook' : 'instagram';
       try {
         // A public reply under the comment.
         if (content.publicReplyTo) {
@@ -107,6 +108,7 @@ export function instagramChannel(db: Db, appSecret: string): ChannelAdapter {
             content.publicReplyTo,
             token,
             text?.type === 'text' ? text.text : '',
+            host,
           );
           return { status: 'sent', externalId: res.id };
         }
@@ -145,7 +147,7 @@ export function instagramChannel(db: Db, appSecret: string): ChannelAdapter {
           content.payloads,
           Boolean(content.privateReplyTo),
         )) {
-          const res = await sendMessage(account.igUserId, token, recipient, message);
+          const res = await sendMessage(account.igUserId, token, recipient, message, host);
           lastId = res.message_id ?? lastId;
         }
         return { status: 'sent', externalId: lastId };

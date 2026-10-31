@@ -20,6 +20,7 @@ export async function refreshExpiringTokens(
     .where(
       and(
         eq(instagramAccounts.status, 'connected'),
+        eq(instagramAccounts.apiHost, 'instagram'),
         lt(instagramAccounts.tokenExpiresAt, soon),
         lt(instagramAccounts.updatedAt, new Date(Date.now() - DAY)),
       ),

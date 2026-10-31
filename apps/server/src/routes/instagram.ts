@@ -138,7 +138,7 @@ export const instagramPublicRoutes =
         .parse(req.query);
       if (q.error) return back({ error: q.error_description || 'Instagram login was cancelled.' });
       const state = q.state
-        ? verifyToken<{ ws: string; u: string; ts: number }>(
+        ? verifyToken<{ ws: string; u: string; m?: 'u' | 'i'; ts: number }>(
             config.appSecret,
             q.state,
             STATE_MAX_AGE,
@@ -152,43 +152,35 @@ export const instagramPublicRoutes =
         });
 
       const settings = await metaAppFor(db, state.ws);
-      const appSecret = decryptOptional(config.appSecret, settings.instagramAppSecretEnc);
-      if (!settings.instagramAppId || !appSecret)
-        return back({ error: 'Add your Instagram app ID and secret first (step 4).' });
+      const redirect = metaUrls(config.publicUrl).oauthRedirect;
 
-      try {
-        const short = await graph.exchangeCode(
-          settings.instagramAppId,
-          appSecret,
-          metaUrls(config.publicUrl).oauthRedirect,
-          q.code,
-        );
-        const long = await graph.longLivedToken(appSecret, short.accessToken);
-        const profile = await graph.me(long.accessToken);
-        const igUserId = String(profile.user_id ?? short.userId);
-        if (profile.account_type && !['BUSINESS', 'MEDIA_CREATOR'].includes(profile.account_type)) {
-          return back({
-            error: `@${profile.username ?? 'that account'} is a personal account. Switch it to Creator or Business (step 1) and try again.`,
-          });
-        }
+      /** Saves (or refreshes) one connected account, then asks Meta to send us its events. */
+      const saveAccount = async (a: {
+        igUserId: string;
+        username?: string;
+        name?: string;
+        profilePictureUrl?: string;
+        accountType?: string;
+        apiHost: graph.Host;
+        token: string;
+        expiresIn?: number;
+      }) => {
         const [owner] = await db
           .select({ ws: instagramAccounts.workspaceId })
           .from(instagramAccounts)
-          .where(eq(instagramAccounts.igUserId, igUserId));
+          .where(eq(instagramAccounts.igUserId, a.igUserId));
         if (owner && owner.ws !== state.ws)
-          return back({
-            error: 'That Instagram account is already connected to another workspace.',
-          });
-
+          return `@${a.username ?? a.igUserId} is already connected to another workspace.`;
         const values = {
           workspaceId: state.ws,
-          igUserId,
-          username: profile.username ?? null,
-          name: profile.name ?? null,
-          profilePictureUrl: profile.profile_picture_url ?? null,
-          accountType: profile.account_type ?? null,
-          accessTokenEnc: encryptSecret(config.appSecret, long.accessToken),
-          tokenExpiresAt: new Date(Date.now() + long.expiresIn * 1000),
+          igUserId: a.igUserId,
+          username: a.username ?? null,
+          name: a.name ?? null,
+          profilePictureUrl: a.profilePictureUrl ?? null,
+          accountType: a.accountType ?? null,
+          apiHost: a.apiHost,
+          accessTokenEnc: encryptSecret(config.appSecret, a.token),
+          tokenExpiresAt: a.expiresIn ? new Date(Date.now() + a.expiresIn * 1000) : null,
           status: 'connected',
           statusDetail: null,
           updatedAt: new Date(),
@@ -198,16 +190,81 @@ export const instagramPublicRoutes =
           .values(values)
           .onConflictDoUpdate({ target: instagramAccounts.igUserId, set: values });
         try {
-          await graph.subscribe(igUserId, long.accessToken);
+          await graph.subscribe(a.igUserId, a.token, a.apiHost);
         } catch (err) {
           await db
             .update(instagramAccounts)
             .set({
               statusDetail: `Connected, but subscribing to its events failed: ${err instanceof graph.MetaError ? err.friendly : String(err)}`,
             })
-            .where(eq(instagramAccounts.igUserId, igUserId));
+            .where(eq(instagramAccounts.igUserId, a.igUserId));
         }
-        return back({ connected: profile.username ?? igUserId });
+        return undefined;
+      };
+
+      try {
+        // Unified login (newer Meta apps): a business system-user token for the accounts the person shared.
+        if (state.m === 'u') {
+          const metaAppId = settings.loginUrl
+            ? new URL(settings.loginUrl).searchParams.get('client_id')
+            : null;
+          const metaAppSecret = decryptOptional(config.appSecret, settings.facebookAppSecretEnc);
+          if (!metaAppId || !metaAppSecret)
+            return back({ error: 'Paste your Login URL and Meta app secret first.' });
+          const token = await graph.exchangeUnifiedCode(metaAppId, metaAppSecret, redirect, q.code);
+          const accounts = await graph.assignedInstagramAccounts(token.accessToken);
+          if (accounts.length === 0) {
+            return back({
+              error:
+                'Meta didn’t share an Instagram account. While logging in, choose your business portfolio and your Instagram account.',
+            });
+          }
+          const problems: string[] = [];
+          for (const a of accounts) {
+            const problem = await saveAccount({
+              igUserId: a.id,
+              username: a.username,
+              name: a.name,
+              profilePictureUrl: a.profile_picture_url,
+              apiHost: 'facebook',
+              token: token.accessToken,
+              expiresIn: token.expiresIn,
+            });
+            if (problem) problems.push(problem);
+          }
+          if (problems.length === accounts.length) return back({ error: problems.join(' ') });
+          return back({ connected: accounts.map((a) => a.username ?? a.id).join(', @') });
+        }
+
+        // Instagram login (older apps): instagram.com OAuth and a 60-day user token.
+        const appSecret = decryptOptional(config.appSecret, settings.instagramAppSecretEnc);
+        if (!settings.instagramAppId || !appSecret)
+          return back({ error: 'Add your Instagram app ID and secret first.' });
+        const short = await graph.exchangeCode(
+          settings.instagramAppId,
+          appSecret,
+          redirect,
+          q.code,
+        );
+        const long = await graph.longLivedToken(appSecret, short.accessToken);
+        const profile = await graph.me(long.accessToken);
+        if (profile.account_type && !['BUSINESS', 'MEDIA_CREATOR'].includes(profile.account_type)) {
+          return back({
+            error: `@${profile.username ?? 'that account'} is a personal account. Switch it to Creator or Business (step 1) and try again.`,
+          });
+        }
+        const problem = await saveAccount({
+          igUserId: String(profile.user_id ?? short.userId),
+          username: profile.username,
+          name: profile.name,
+          profilePictureUrl: profile.profile_picture_url,
+          accountType: profile.account_type,
+          apiHost: 'instagram',
+          token: long.accessToken,
+          expiresIn: long.expiresIn,
+        });
+        if (problem) return back({ error: problem });
+        return back({ connected: profile.username ?? String(profile.user_id ?? short.userId) });
       } catch (err) {
         req.log.warn({ err: String(err) }, 'instagram connect failed');
         return back({
@@ -247,10 +304,19 @@ export const instagramRoutes =
         })
         .from(instagramAccounts)
         .where(eq(instagramAccounts.workspaceId, workspaceId));
+      const login = s.loginUrl ? new URL(s.loginUrl) : undefined;
       return {
         publicUrl: config.publicUrl,
         isPublic: config.publicUrl.startsWith('https://'),
         urls: metaUrls(config.publicUrl),
+        loginMode: s.loginUrl ? 'unified' : s.instagramAppId ? 'instagram' : null,
+        loginUrl: s.loginUrl,
+        metaAppId: login?.searchParams.get('client_id') ?? null,
+        configId: login?.searchParams.get('config_id') ?? null,
+        /** False when the Login URL was made for a different redirect than this install's. */
+        loginRedirectMatches: login?.searchParams.has('redirect_uri')
+          ? login.searchParams.get('redirect_uri') === metaUrls(config.publicUrl).oauthRedirect
+          : null,
         instagramAppId: s.instagramAppId,
         hasInstagramAppSecret: Boolean(s.instagramAppSecretEnc),
         hasFacebookAppSecret: Boolean(s.facebookAppSecretEnc),
@@ -281,12 +347,24 @@ export const instagramRoutes =
             .optional(),
           instagramAppSecret: secret.optional(),
           facebookAppSecret: secret.optional(),
+          loginUrl: z
+            .url()
+            .refine((u) => {
+              const url = new URL(u);
+              return (
+                /(^|\.)facebook\.com$/.test(url.hostname) &&
+                url.searchParams.has('client_id') &&
+                url.searchParams.has('config_id')
+              );
+            }, 'Paste the Login URL Meta shows under your configuration. It starts with https://www.facebook.com/ and contains config_id.')
+            .optional(),
         })
         .parse(req.body);
       await metaAppFor(db, workspace.id);
       await db
         .update(metaApps)
         .set({
+          ...(body.loginUrl ? { loginUrl: body.loginUrl } : {}),
           ...(body.instagramAppId ? { instagramAppId: body.instagramAppId } : {}),
           ...(body.instagramAppSecret
             ? { instagramAppSecretEnc: encryptSecret(config.appSecret, body.instagramAppSecret) }
@@ -304,14 +382,27 @@ export const instagramRoutes =
     app.get('/instagram/connect', async (req, reply) => {
       const { user, workspace } = who(req);
       const s = await metaAppFor(db, workspace.id);
-      if (!s.instagramAppId || !s.instagramAppSecretEnc) {
-        return reply.redirect(
-          `/channels?${new URLSearchParams({ error: 'Add your Instagram app ID and secret first (step 4).' })}`,
-        );
+      const redirect = metaUrls(config.publicUrl).oauthRedirect;
+      if (s.loginUrl && s.facebookAppSecretEnc) {
+        const state = signToken(config.appSecret, {
+          ws: workspace.id,
+          u: user.id,
+          m: 'u',
+          ts: Date.now(),
+        });
+        return reply.redirect(graph.unifiedAuthorizeUrl(s.loginUrl, redirect, state));
       }
-      const state = signToken(config.appSecret, { ws: workspace.id, u: user.id, ts: Date.now() });
+      if (s.instagramAppId && s.instagramAppSecretEnc) {
+        const state = signToken(config.appSecret, {
+          ws: workspace.id,
+          u: user.id,
+          m: 'i',
+          ts: Date.now(),
+        });
+        return reply.redirect(graph.authorizeUrl(s.instagramAppId, redirect, state));
+      }
       return reply.redirect(
-        graph.authorizeUrl(s.instagramAppId, metaUrls(config.publicUrl).oauthRedirect, state),
+        `/channels?${new URLSearchParams({ error: 'Paste your Login URL and Meta app secret first.' })}`,
       );
     });
 
@@ -333,7 +424,11 @@ export const instagramRoutes =
       const token = account ? decryptOptional(config.appSecret, account.accessTokenEnc) : undefined;
       if (!account || !token) return reply.code(409).send({ error: 'not_connected' });
       try {
-        const media = await graph.recentMedia(token);
+        const media = await graph.recentMedia(
+          token,
+          account.apiHost === 'facebook' ? 'facebook' : 'instagram',
+          account.igUserId,
+        );
         return {
           media: media.map((m) => ({
             id: m.id,

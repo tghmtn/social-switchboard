@@ -103,7 +103,11 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
           ),
         );
       if (existing || !token) return undefined;
-      const username = await lookupUsername(token, igsid);
+      const username = await lookupUsername(
+        token,
+        igsid,
+        account.apiHost === 'facebook' ? 'facebook' : 'instagram',
+      );
       return username ? { username } : undefined;
     };
 

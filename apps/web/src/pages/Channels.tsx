@@ -121,12 +121,13 @@ export function Channels() {
 
   const connected = s?.accounts.filter((a) => a.status === 'connected') ?? [];
   const firstConnectedAt = connected.map((a) => a.connectedAt).sort()[0];
-  const credentialsSaved = Boolean(s?.instagramAppId && s.hasInstagramAppSecret);
+  const appMade = Boolean(s?.loginMode);
   const proven: Record<string, boolean> = {
     account: connected.length > 0,
-    developer: credentialsSaved,
-    app: credentialsSaved,
-    credentials: credentialsSaved && Boolean(s?.hasFacebookAppSecret),
+    developer: appMade,
+    app: appMade,
+    login: appMade,
+    credentials: Boolean(s && canConnect(s)),
     tester: connected.length > 0,
     webhooks: Boolean(s?.webhookVerifiedAt),
     connect: connected.length > 0,
@@ -340,15 +341,14 @@ function StepExtras({
         />
       );
     case 'connect': {
-      const ready = Boolean(s.instagramAppId && s.hasInstagramAppSecret);
       return (
         <div className="grid gap-3">
-          {ready ? (
+          {canConnect(s) ? (
             <a className="btn btn-primary w-fit" href="/api/instagram/connect">
               {connected.length ? 'Connect another account' : 'Connect Instagram'}
             </a>
           ) : (
-            <p className="text-[14px] text-muted">Save your app ID and secret (step 4) first.</p>
+            <p className="text-[14px] text-muted">Save your Login URL and Meta app secret first.</p>
           )}
           <Check
             ok={connected.length > 0}
@@ -373,6 +373,14 @@ function StepExtras({
   }
 }
 
+/** Everything the Connect button needs: a way to log in, and the secret to finish it with. */
+function canConnect(s: InstagramSettings) {
+  if (s.loginMode === 'unified') return s.hasFacebookAppSecret;
+  return s.loginMode === 'instagram' && s.hasInstagramAppSecret;
+}
+
+const SAVED = 'Saved. Paste a new one to replace it.';
+
 function CredentialsForm({
   settings: s,
   onSaved,
@@ -386,24 +394,24 @@ function CredentialsForm({
 
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     const body: Record<string, string> = {};
-    for (const key of ['instagramAppId', 'instagramAppSecret', 'facebookAppSecret']) {
+    for (const key of ['loginUrl', 'facebookAppSecret', 'instagramAppId', 'instagramAppSecret']) {
       const v = String(form.get(key) ?? '').trim();
       if (v) body[key] = v;
     }
     setBusy(true);
     setErrors({});
+    setSaved(false);
     try {
       await api('/instagram/settings', body, 'PUT');
-      e.currentTarget?.reset();
+      formEl.reset();
       setSaved(true);
       onSaved();
     } catch (err) {
       setErrors(
-        err instanceof ApiError
-          ? err.fieldErrors()
-          : { instagramAppId: 'Couldn’t save. Try again.' },
+        err instanceof ApiError ? err.fieldErrors() : { loginUrl: 'Couldn’t save. Try again.' },
       );
     } finally {
       setBusy(false);
@@ -413,27 +421,56 @@ function CredentialsForm({
   return (
     <form onSubmit={save} className="grid gap-3 border-2 border-line p-4" autoComplete="off">
       <Field
-        label="Instagram app ID"
-        name="instagramAppId"
-        inputMode="numeric"
-        placeholder={s.instagramAppId ?? 'e.g. 1234567890123456'}
-        error={errors.instagramAppId}
+        label="Login URL"
+        name="loginUrl"
+        inputMode="url"
+        placeholder={
+          s.loginUrl
+            ? `Saved (configuration ${s.configId}). Paste a new one to replace it.`
+            : 'https://www.facebook.com/dialog/oauth?client_id=…&config_id=…'
+        }
+        error={errors.loginUrl}
+        hint="API setup with Unified login → Configure your app → Login URL → Copy."
       />
+      {s.loginRedirectMatches === false && (
+        <p className="border-2 border-accent bg-surface px-3 py-2 text-[13px]">
+          That Login URL sends people to a different address after they log in. In the same
+          configuration, register <code>{s.urls.oauthRedirect}</code> as a redirect URL.
+        </p>
+      )}
       <Field
-        label="Instagram app secret"
-        name="instagramAppSecret"
-        type="password"
-        placeholder={s.hasInstagramAppSecret ? 'Saved. Paste a new one to replace it.' : ''}
-        error={errors.instagramAppSecret}
-      />
-      <Field
-        label="Facebook app secret"
+        label="Meta app secret"
         name="facebookAppSecret"
         type="password"
-        placeholder={s.hasFacebookAppSecret ? 'Saved. Paste a new one to replace it.' : ''}
+        placeholder={s.hasFacebookAppSecret ? SAVED : ''}
         error={errors.facebookAppSecret}
-        hint="App settings → Basic. Used to check that messages really come from Meta."
+        hint="App settings → Basic → App secret → Show. Used to finish logging in and to check that messages really come from Meta."
       />
+      <details className="border-2 border-line px-3 py-2">
+        <summary className="cursor-pointer text-[14px] font-bold">
+          Older app with “API setup with Instagram login”?
+        </summary>
+        <div className="mt-3 grid gap-3">
+          <p className="text-[13px] text-muted">
+            Apps made before mid-2026 may have this instead of Unified login. Copy the ID and secret
+            from that page. You still need the Meta app secret above.
+          </p>
+          <Field
+            label="Instagram app ID"
+            name="instagramAppId"
+            inputMode="numeric"
+            placeholder={s.instagramAppId ?? 'e.g. 1234567890123456'}
+            error={errors.instagramAppId}
+          />
+          <Field
+            label="Instagram app secret"
+            name="instagramAppSecret"
+            type="password"
+            placeholder={s.hasInstagramAppSecret ? SAVED : ''}
+            error={errors.instagramAppSecret}
+          />
+        </div>
+      </details>
       <div className="flex items-center gap-3">
         <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
           Save

@@ -87,6 +87,13 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
           : undefined;
     calls.push({ method: init?.method ?? 'GET', url, body });
     const path = url.pathname.replace(/^\/v[\d.]+/, '');
+    if (url.host === 'graph.facebook.com') {
+      if (path === '/oauth/access_token') return json({ access_token: 'system-user-token' });
+      if (path === '/me/assigned_instagram_accounts')
+        return json({ data: [{ id: IG_ID, username: 'tgunified', name: 'TG' }] });
+      if (path === `/${IG_ID}/media`)
+        return json({ data: [{ id: 'm1', media_type: 'IMAGE', caption: 'Hi', media_url: 'x' }] });
+    }
     if (url.host === 'api.instagram.com')
       return json({ access_token: 'short-token', user_id: Number(IG_ID) });
     if (path === '/access_token')
@@ -234,6 +241,92 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
 
     const expired = await call('GET', '/api/instagram/callback?code=abc&state=forged');
     expect(String(expired.headers.location)).toContain('error=');
+  });
+
+  it('connects through Unified login and talks to graph.facebook.com', async () => {
+    const loginUrl =
+      'https://www.facebook.com/dialog/oauth?client_id=1076000000000001&config_id=2900000000000001&display=popup&redirect_uri=https%3A%2F%2Fswitchboard.example.test%2Fapi%2Finstagram%2Fcallback&response_type=code';
+    const wrong = await call('PUT', '/api/instagram/settings', {
+      loginUrl: 'https://evil.example.test/dialog/oauth?client_id=1&config_id=2',
+    });
+    expect(wrong.status).toBe(400);
+    const saved = await call<Record<string, unknown>>('PUT', '/api/instagram/settings', {
+      loginUrl,
+      facebookAppSecret: FB_SECRET,
+    });
+    expect(saved.body).toMatchObject({
+      loginMode: 'unified',
+      metaAppId: '1076000000000001',
+      configId: '2900000000000001',
+      loginRedirectMatches: true,
+      hasFacebookAppSecret: true,
+    });
+
+    const start = new URL(String((await call('GET', '/api/instagram/connect')).headers.location));
+    expect(start.origin + start.pathname).toBe('https://www.facebook.com/dialog/oauth');
+    expect(start.searchParams.get('config_id')).toBe('2900000000000001');
+    expect(start.searchParams.get('display')).toBe('page');
+    const back = await call(
+      'GET',
+      `/api/instagram/callback?code=abc&state=${encodeURIComponent(start.searchParams.get('state') ?? '')}`,
+    );
+    expect(String(back.headers.location)).toBe('/channels?connected=tgunified');
+
+    const exchange = calls.find((c) => c.url.pathname.endsWith('/oauth/access_token'));
+    expect(exchange?.url.searchParams.get('client_id')).toBe('1076000000000001');
+    expect(exchange?.url.searchParams.get('client_secret')).toBe(FB_SECRET);
+    const [account] = await db.select().from(instagramAccounts);
+    expect(account).toMatchObject({ igUserId: IG_ID, username: 'tgunified', apiHost: 'facebook' });
+    expect(account?.tokenExpiresAt).toBeNull();
+    const subscribe = calls.find((c) => c.url.pathname.endsWith(`/${IG_ID}/subscribed_apps`));
+    expect(subscribe?.url.host).toBe('graph.facebook.com');
+    expect(subscribe?.body).toMatchObject({
+      subscribed_fields: expect.stringContaining('comments'),
+    });
+
+    const media = await call<{ media: { id: string }[] }>('GET', '/api/instagram/media');
+    expect(media.body.media.map((m) => m.id)).toEqual(['m1']);
+
+    // A comment signed with the Meta app secret becomes a private reply through graph.facebook.com.
+    const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
+      name: 'Hello',
+      starter: 'blank',
+    });
+    await call('PUT', `/api/flows/${body.flow.id}/draft`, {
+      graph: {
+        nodes: [
+          { id: 'start', type: 'start' },
+          { id: 'a', type: 'message', data: { parts: [{ type: 'text', text: 'Hi!' }] } },
+        ],
+        edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'a' }],
+      },
+    });
+    await call('POST', `/api/flows/${body.flow.id}/publish`, {});
+    await call('POST', '/api/triggers', { flowId: body.flow.id, config: { type: 'comment' } });
+    calls = [];
+    const res = await webhook(
+      {
+        object: 'instagram',
+        entry: [
+          {
+            id: IG_ID,
+            changes: [
+              {
+                field: 'comments',
+                value: { id: 'c5', text: 'hi', from: { id: 'fan-igsid' }, media: { id: 'm1' } },
+              },
+            ],
+          },
+        ],
+      },
+      FB_SECRET,
+    );
+    expect(res.statusCode).toBe(200);
+    await settled();
+    const [sent] = sends();
+    expect(sent?.url.host).toBe('graph.facebook.com');
+    expect(sent?.url.pathname).toMatch(new RegExp(`/${IG_ID}/messages$`));
+    expect(sent?.body).toEqual({ recipient: { comment_id: 'c5' }, message: { text: 'Hi!' } });
   });
 
   it('rejects unsigned webhooks', async () => {

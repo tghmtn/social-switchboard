@@ -32,34 +32,39 @@ Instagram only lets apps work with professional accounts. Switching is free.
 1. Go to **developers.facebook.com/apps** and click **Create app**.
 2. **App name:** something like `Social Switchboard`. People may see it when they connect. Meta rejects names containing "Instagram", "Insta", "IG", "Facebook" or "Meta".
 3. **Use case:** set the filter to **All**, then choose **Manage messaging & content on Instagram**.
-   Don't choose "Authenticate with Facebook Login" or anything about ads. Those break the connection or add heavy reviews.
-4. **Business portfolio:** choose **I don't want to connect a business portfolio yet**.
+   Don't choose "Authenticate with Facebook Login" or anything about ads.
+4. **Business portfolio:** pick yours, or create one. Instagram's login needs a portfolio to own the app. A portfolio for yourself is fine; it's free and needs no company.
 5. Finish with **Create app**.
+6. Open **App settings → Basic** and fill in:
+   - **Privacy policy URL:** `{{PRIVACY}}`
+   - **Terms of service URL:** `{{TERMS}}`
+   - **User data deletion:** choose the callback option and use `{{DATA_DELETION}}`
+   - **App icon** (1024×1024) and **Category**
+7. Click **Save changes**.
 
-## step: credentials | Copy your app's IDs and secrets into Social Switchboard
+## step: login | Set up Instagram login
 
-Your Meta app has two pairs of keys. Copy them into the form below. They're stored encrypted on your server, and Social Switchboard never shows them again.
+In your app, open **Use cases**, then **Customize** next to **Manage messaging & content on Instagram**, then **API setup with Unified login**. Under **1. Configure your app**:
 
-- **Instagram app ID and secret:** in your app, open **Use cases**, then **Manage messaging & content on Instagram**, then **Customize**, then **API setup with Instagram login**. Click **Show** next to the secret.
-- **Facebook app secret:** **App settings → Basic → App secret**, then **Show**.
+1. Click **Create configuration** (or **Create another configuration**). Keep the defaults: a **system-user access token** that **never expires**, with **Instagram accounts** as the asset.
+2. **Permissions:** keep **instagram_basic**, **instagram_manage_comments** and **instagram_manage_messages**. You can remove the ads permissions and **instagram_content_publish**; Social Switchboard doesn't use them, and fewer permissions make App Review easier.
+3. Under **Register a new redirect URL**, paste `{{OAUTH_REDIRECT}}` and click **Save**. It should then show in **Select the registered URL**.
+4. Leave this page open. The next step needs the **Login URL** from the bottom of it.
 
-The Instagram app ID is a different number from the "App ID" at the top of the Basic page. Use the one from the Instagram setup page.
+**Older app?** If your dashboard shows **API setup with Instagram login** instead, open **Set up Instagram business login → Business login settings** there, paste `{{OAUTH_REDIRECT}}` as the redirect, `{{DEAUTHORIZE}}` as the deauthorize callback and `{{DATA_DELETION}}` for data deletion, and save. Then use the "Older app" part of the next step's form.
 
-## step: login | Paste the login settings
+## step: credentials | Paste your Login URL and app secret
 
-Still in **API setup with Instagram login**, open **Set up Instagram business login → Business login settings** and paste:
+- **Login URL:** at the bottom of **1. Configure your app**, click **Copy** next to **Login URL**.
+- **Meta app secret:** **App settings → Basic → App secret**, then **Show**.
 
-- **OAuth redirect URIs:** `{{OAUTH_REDIRECT}}`
-- **Deauthorize callback URL:** `{{DEAUTHORIZE}}`
-- **Data deletion request URL:** `{{DATA_DELETION}}`
-
-Save. Ignore the "Embed URL" Meta shows. Social Switchboard builds its own login link.
+They're stored encrypted on your server, and Social Switchboard never shows the secret again. The Login URL isn't secret: it's the address of Meta's sign-in page for your app.
 
 ## step: tester | Add your account as an Instagram tester
 
-Until your app is reviewed, only accounts with a role on it can connect. Even your own account needs this, and it has two halves.
+Until your app passes App Review, only accounts with a role on it can connect. Even your own account needs this, and it has two halves.
 
-**In the Meta dashboard:** open **App roles → Roles**, find **Instagram Testers**, click **Add**, and enter your Instagram username exactly. Some versions put this under **API setup with Instagram login → Generate access tokens → Add account**.
+**In the Meta dashboard:** open **App roles → Roles**, find **Instagram Testers**, click **Add**, and enter your Instagram username exactly.
 
 **In Instagram, on that account:**
 - **App:** Profile → **☰** → **Settings and activity** → **Apps and websites** → **Tester invites** → **Accept**.
@@ -69,7 +74,7 @@ Until you accept, connecting fails with "Insufficient developer role".
 
 ## step: webhooks | Turn on webhooks
 
-Webhooks are how Instagram tells this server about new comments and messages. In **API setup with Instagram login**, open **Configure webhooks**:
+Webhooks are how Instagram tells this server about new comments and messages. On the same **API setup** page, open **3. Configure webhooks**:
 
 - **Callback URL:** `{{WEBHOOK}}`
 - **Verify token:** `{{VERIFY_TOKEN}}`
@@ -81,20 +86,24 @@ Then **subscribe** to the **comments** and **messages** fields, plus **messaging
 
 ## step: connect | Connect your Instagram account
 
-Click **Connect Instagram** below. Instagram asks you to log in and approve. Use the account you added as a tester, then you'll come back here.
+Click **Connect Instagram** below. Meta asks you to log in, then to choose your **business portfolio** and your **Instagram account**, and to approve the permissions. Keep everything ticked. Then you'll come back here.
 
-## step: publish | Publish your app
+If it says no Instagram account was shared, connect again and make sure the account is ticked. If your account isn't in the list at all, add it to your portfolio first: **business.facebook.com → Settings → Accounts → Instagram accounts → Add**.
 
-Meta only sends real comments and messages to **published** apps. In development mode only the dashboard's test button works. Publishing doesn't need an App Review for accounts that are testers on your app.
+## step: publish | Get real comments and messages
 
-1. In **App settings → Basic**, fill in:
-   - **Privacy policy URL:** `{{PRIVACY}}`
-   - **Terms of service URL:** `{{TERMS}}`
-   - **User data deletion:** choose the callback option and use `{{DATA_DELETION}}`
-   - **App icon** (1024×1024) and **Category**, if they're still empty
-2. Save, then click **Publish** in the left sidebar and follow the prompts.
+Meta's dashboard lists **4. Complete App Review** before your app gets "live data". What that means for you depends on what Meta sends, so try it first:
 
-The check below turns green once a real event from Instagram reaches this server, such as a comment on one of your posts.
+1. From a **different** Instagram account, comment on one of your posts. The check below turns green when Instagram tells this server about it.
+2. **Green?** You're set for your own accounts. Skip to the next step.
+3. **Still waiting after a minute?** Click **Publish** in the dashboard's left sidebar, then comment again.
+4. **Still nothing?** Your app needs App Review. Open **4. Complete App Review** on the API setup page. Meta asks for:
+   - a **verified business portfolio** (Business settings → Security center → **Start verification**)
+   - **Advanced access** to instagram_basic, instagram_manage_comments and instagram_manage_messages
+   - a short screen recording of each permission in use; record a comment turning into a DM here
+   - the privacy policy, terms and data deletion addresses from step 3
+
+Review usually takes a few days. After it's approved, click **Publish**.
 
 ## step: test | Try it
 
