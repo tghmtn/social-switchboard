@@ -52,8 +52,9 @@ MIT code may be copied into this AGPL project, but its copyright notice has to c
 
 ## Meta / Instagram access (good news for self-hosting)
 
-- **For your own Instagram account(s):** create your own Meta developer app, add your account as an Instagram tester, and **publish the app (Live)**. Auto-DMing *anyone* who comments needs **no App Review and no business verification** for tester accounts, but Meta only sends real comment events to published apps; in development mode only the dashboard's test button fires. Publishing requires public privacy, terms and data-deletion URLs. (Corrected 2026-10-31 from OpenReply's setup guide; development mode alone is not enough.)
-- **App Review and Business Verification** (which needs a registered legal business) are only needed when one install connects *other people's* accounts, e.g. an agency.
+- **For your own Instagram account(s):** create your own Meta developer app, owned by a business portfolio (a free personal one works), add your account as an Instagram tester, and connect. Since mid-2026 new apps get **API setup with Unified login** (Facebook Login for Business configuration → Login URL, system-user tokens, `graph.facebook.com`); older apps keep **API setup with Instagram login**. Both are supported.
+- **Real events (open question, being tested 2026-10-31):** Meta's Unified login page lists "Complete App Review" before an app gets live data, and its docs say comment webhooks need Advanced Access to `instagram_manage_comments`, which needs App Review and a verified business. We test first what a Live app with tester accounts receives; the wizard's "Get real comments and messages" step walks through App Review if nothing arrives.
+- **App Review and Business Verification** need a registered legal business. They are definitely needed when one install connects *other people's* accounts, such as an agency.
 - So the open-source model is that **every deployer creates their own Meta app.** Our job is a setup wizard that makes that painless: it shows the exact callback URLs, the webhook verify token, the fields to subscribe and the permissions to add.
 - Every install needs a **public HTTPS URL** for webhooks. We ship two options: a Cloudflare Tunnel (how this server already works) or Caddy with a domain.
 - Rules the engine enforces in code, not just in docs:
@@ -166,7 +167,7 @@ Each phase ends with something you can actually use.
 > **Status (2026-10-31): built, waiting on the live Meta connection.**
 > - **Safe public access:** per-request secure cookies, a setup code for first-time setup from outside the network, `/terms`, and `switchboard.gharring.com` live through a Cloudflare Tunnel.
 > - **The Connect Instagram wizard:** layers 1 and 2. Steps, live checks, encrypted secrets and copyable URLs, with the guide text in `docs/guides/connect-instagram.md`, fetched fresh from GitHub.
-> - **Instagram Login OAuth:** long-lived tokens, refreshed daily by the worker. Deauthorize callback.
+> - **Unified login** (newer apps: Login URL + Meta app secret, never-expiring system-user tokens) or **Instagram Login OAuth** (older apps: long-lived tokens, refreshed daily by the worker). Deauthorize callback.
 > - **Signed webhooks:** stored first, then processed. Covers comments, DMs, quick-reply taps, postbacks and ref links.
 > - **Comment triggers:** keywords, any post or picked posts, and random public replies. The first message is the comment's private reply; anything after it is held, with the reason, until the person writes back. The simulator can send comments too.
 > - **Instagram sending:** text, images, button templates and quick replies, within the 24-hour window, with plain-language errors (thread owner, expired token, window).
