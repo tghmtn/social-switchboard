@@ -126,6 +126,15 @@ describe.skipIf(!databaseUrl)('privacy page and data deletion', () => {
     expect((await app.inject({ url: '/data-deletion?code=nope' })).statusCode).toBe(404);
   });
 
+  it('shows deletion instructions to people and to Meta’s URL check', async () => {
+    const page = await app.inject({ url: '/data-deletion' });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain('Delete your data');
+    const opened = await app.inject({ url: '/api/meta/data-deletion' });
+    expect(opened.statusCode).toBe(302);
+    expect(opened.headers.location).toBe('/data-deletion');
+  });
+
   it('keeps the rest of the API JSON-only', async () => {
     const res = await app.inject({
       method: 'POST',

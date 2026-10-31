@@ -129,13 +129,26 @@ export const legalRoutes =
         ? `<h1>Data deleted</h1>
 <p>Request <code>${esc(row.confirmationCode)}</code> was completed on ${row.createdAt.toISOString().slice(0, 10)}.
 ${row.contactsDeleted > 0 ? 'Your contact record, messages and conversation history were deleted.' : 'We held no data about you.'}</p>`
-        : `<h1>Data deletion</h1>
-<p>We couldn’t find that request. Check the confirmation code, or remove this app in your Instagram or Facebook settings (Apps and websites) to request deletion.</p>`;
+        : code
+          ? `<h1>Data deletion</h1>
+<p>We couldn’t find that request. Check the confirmation code, or remove this app in your Instagram or Facebook settings (Apps and websites) to request deletion.</p>`
+          : `<h1>Delete your data</h1>
+<p>When you message or comment to an Instagram account that uses this app, it keeps your username, the messages you exchange and anything you share in the conversation, such as an email address.</p>
+<p>To have it deleted:</p>
+<ul>
+<li><b>On Instagram:</b> Settings and activity → Apps and websites → find this app → Remove.</li>
+<li><b>On Facebook:</b> Settings and privacy → Settings → Business integrations → find this app → Remove.</li>
+<li><b>Or</b> message the account and ask its owner to delete your data.</li>
+</ul>
+<p>When you remove the app, Meta tells us and we delete your contact record, messages and conversation history. You get a confirmation code you can check on this page.</p>`;
       return reply
         .code(row || !code ? 200 : 404)
         .type('text/html; charset=utf-8')
         .send(page('Data deletion', `<div class="card">${body}</div>`));
     });
+
+    // Meta's settings page checks the address by opening it; show the instructions instead of a 404.
+    app.get('/api/meta/data-deletion', async (_req, reply) => reply.redirect('/data-deletion'));
 
     /** Meta's data-deletion callback: verify the signature, erase the person, return a status link. */
     app.post('/api/meta/data-deletion', async (req, reply) => {

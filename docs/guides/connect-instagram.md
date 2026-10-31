@@ -45,7 +45,7 @@ Instagram only lets apps work with professional accounts. Switching is free.
 1. Fill in:
    - **Privacy policy URL:** `{{PRIVACY}}`
    - **Terms of service URL:** `{{TERMS}}`
-   - **User data deletion:** choose the callback option and use `{{DATA_DELETION}}`
+   - **User data deletion:** open its dropdown, choose **Data deletion callback URL** (not "instructions URL"), and use `{{DATA_DELETION}}`. Meta then tells this server when someone removes your app, and their data is deleted automatically. If you only see an instructions URL, use `{{PUBLIC_URL}}/data-deletion`.
    - **App icon** (1024×1024) and **Category**
 2. Click **Save changes**.
 3. Next to **App secret**, click **Show**. Meta may ask for your Facebook password first. Paste the secret below.
