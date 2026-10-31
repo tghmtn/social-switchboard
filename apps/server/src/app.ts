@@ -3,23 +3,34 @@ import { join } from 'node:path';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import { asc, eq } from 'drizzle-orm';
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import { ZodError } from 'zod';
 import { findSessionUser, SESSION_COOKIE, sessionCookieOptions } from './auth/sessions';
 import type { Config } from './config';
 import type { Db } from './db/client';
+import { workspaceMembers, workspaces } from './db/schema';
 import { authRoutes } from './routes/auth';
+import { contactRoutes } from './routes/contacts';
+import { flowRoutes } from './routes/flows';
 import { healthRoutes } from './routes/health';
+import { libraryRoutes } from './routes/library';
+import { simulatorRoutes } from './routes/simulator';
+import { type ChannelRegistry, defaultChannels } from './runtime/channels';
+import type { RuntimeDeps } from './runtime/runtime';
 
 export type SessionUser = { id: string; email: string; name: string };
+export type RequestWorkspace = { id: string; role: 'owner' | 'admin' | 'agent'; timeZone: string };
 
 declare module 'fastify' {
   interface FastifyRequest {
     user: SessionUser | null;
+    workspace: RequestWorkspace | null;
   }
 }
 
-export type AppDeps = { db: Db; config: Config };
+export type AppDeps = { db: Db; config: Config; channels?: ChannelRegistry; now?: () => Date };
+export type RouteDeps = AppDeps & { runtime: RuntimeDeps };
 
 export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logger'] = true) {
   const { config } = deps;
@@ -32,6 +43,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
   await app.register(rateLimit, { global: false });
 
   app.decorateRequest('user', null);
+  app.decorateRequest('workspace', null);
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     const token = req.cookies[SESSION_COOKIE];
@@ -43,6 +55,15 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     }
     req.user = found.user;
     reply.setCookie(SESSION_COOKIE, token, sessionCookieOptions(config, found.expiresAt));
+    // One workspace per install for now; the first membership is the active one.
+    const [membership] = await deps.db
+      .select({ id: workspaces.id, role: workspaceMembers.role, timeZone: workspaces.timeZone })
+      .from(workspaceMembers)
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
+      .where(eq(workspaceMembers.userId, found.user.id))
+      .orderBy(asc(workspaceMembers.createdAt))
+      .limit(1);
+    req.workspace = membership ?? null;
   });
 
   app.setErrorHandler((err, req, reply) => {
@@ -55,8 +76,20 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     return reply.code(500).send({ error: 'internal_error' });
   });
 
+  const routeDeps: RouteDeps = {
+    ...deps,
+    runtime: {
+      db: deps.db,
+      channels: deps.channels ?? defaultChannels(),
+      now: deps.now,
+      log: (msg, fields) => app.log.info(fields ?? {}, msg),
+    },
+  };
   await app.register(healthRoutes(deps), { prefix: '/api' });
   await app.register(authRoutes(deps), { prefix: '/api' });
+  for (const routes of [contactRoutes, libraryRoutes, flowRoutes, simulatorRoutes]) {
+    await app.register(routes(routeDeps), { prefix: '/api' });
+  }
 
   // Serve the built web app, falling back to index.html for client-side routes.
   const hasWeb = existsSync(join(config.webDist, 'index.html'));

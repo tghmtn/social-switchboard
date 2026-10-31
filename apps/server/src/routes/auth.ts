@@ -57,7 +57,7 @@ export const authRoutes =
           .returning({ id: users.id, email: users.email, name: users.name });
         const [workspace] = await tx
           .insert(workspaces)
-          .values({ name: body.workspaceName })
+          .values({ name: body.workspaceName, timeZone: config.timeZone })
           .returning({ id: workspaces.id });
         if (!created || !workspace) throw new Error('setup insert returned no rows');
         await tx

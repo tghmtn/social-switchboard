@@ -8,4 +8,6 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   sourcemap: true,
+  // Workspace packages ship as TypeScript source, so bundle them in.
+  noExternal: [/^@social-switchboard\//],
 });

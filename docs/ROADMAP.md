@@ -116,6 +116,13 @@ Each phase ends with something you can actually use.
 
 **Goal:** build a full lead-capture flow and run it end-to-end in the browser.
 
+> **Status (2026-10-31): backend done, UI waiting on the design package.**
+> - `packages/flow`: the schema, wiring validation, trigger matching, starter flows and a pure engine, covered by 31 tests.
+> - Server: contacts, fields, tags, consent, the timeline and CSV export; flows with draft/publish versions; triggers; the simulator API.
+> - Runtime: a per-contact lock, and an outbox so messages are never lost or sent twice. The worker fires delays and reply timeouts.
+> - The WORKSHOP scenario passes end to end over the API, and in the Docker stack with a real worker-fired delay.
+> - **Still to do:** the builder canvas, and the Contacts and Simulator screens. Simulator "test" versions also pile up and need pruning eventually.
+
 - **Contacts:**
   - profile and per-channel identities
   - custom fields (text, number, date, email, phone, choice)

@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["src", "tsup.config.ts", "drizzle.config.ts"]
+  "include": ["src", "tsup.config.ts", "drizzle.config.ts", "vitest.config.ts"]
 }
