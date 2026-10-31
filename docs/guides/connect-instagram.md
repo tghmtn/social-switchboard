@@ -95,7 +95,7 @@ The account then shows under Instagram accounts. Your posts and followers don't 
 
 Click **Connect Instagram** below. Meta asks you to log in, then to choose your **business portfolio** and your **Instagram account**, and to approve the permissions. Keep everything ticked. Then you'll come back here.
 
-If it also asks for an **Ad Account**, don't create one. That question comes from ads permissions; remove them from your configuration (the login step), then connect again.
+Along the way Meta may show **Ad Account · Optional** and a page called **Enter business information for new assets** (name, country, website, currency, time zone), even without ads permissions. Fill that page in with your own details. For **Website**, use your own site or this install's address, `{{PUBLIC_URL}}`. Social Switchboard doesn't use any of it.
 
 If it says no Instagram account was shared, connect again and make sure the account is ticked. If the list is empty or says "Instagram Pro account required", do the portfolio step above first.
 
