@@ -15,6 +15,7 @@ import { contactRoutes } from './routes/contacts';
 import { flowRoutes } from './routes/flows';
 import { healthRoutes } from './routes/health';
 import { libraryRoutes } from './routes/library';
+import { overviewRoutes } from './routes/overview';
 import { simulatorRoutes } from './routes/simulator';
 import { type ChannelRegistry, defaultChannels } from './runtime/channels';
 import type { RuntimeDeps } from './runtime/runtime';
@@ -87,7 +88,13 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
   };
   await app.register(healthRoutes(deps), { prefix: '/api' });
   await app.register(authRoutes(deps), { prefix: '/api' });
-  for (const routes of [contactRoutes, libraryRoutes, flowRoutes, simulatorRoutes]) {
+  for (const routes of [
+    contactRoutes,
+    libraryRoutes,
+    flowRoutes,
+    simulatorRoutes,
+    overviewRoutes,
+  ]) {
     await app.register(routes(routeDeps), { prefix: '/api' });
   }
 

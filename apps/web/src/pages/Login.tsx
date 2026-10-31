@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { ApiError, api } from '../api';
-import { AuthCard, Button, Field, FormError } from '../ui';
+import { AuthCard, Field, FormError } from '../ui';
 
 export function Login({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -39,9 +39,9 @@ export function Login({ onDone }: { onDone: () => void }) {
           autoComplete="current-password"
           required
         />
-        <Button type="submit" disabled={busy} className="w-full">
+        <button type="submit" disabled={busy} className="btn btn-primary w-full">
           {busy ? 'Signing in…' : 'Sign in'}
-        </Button>
+        </button>
       </form>
     </AuthCard>
   );

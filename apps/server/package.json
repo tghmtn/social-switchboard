@@ -4,7 +4,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=../../.env --watch --import tsx src/server.ts",
+    "dev": "HOST=127.0.0.1 PORT=3100 node --env-file-if-exists=../../.env --watch --import tsx src/server.ts",
     "dev:worker": "node --env-file-if-exists=../../.env --watch --import tsx src/worker.ts",
     "build": "tsup",
     "typecheck": "tsc",

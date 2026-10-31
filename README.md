@@ -40,7 +40,7 @@ Backups run nightly at 03:30 (container time zone, `TZ` in `.env`). The last 14 
 ```bash
 pnpm install
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres   # Postgres on 127.0.0.1:55432
-pnpm dev                      # API on :3000, web on :5173 with hot reload
+pnpm dev                      # API on :3100, web on :5173 with hot reload
 pnpm check                    # typecheck + lint + tests
 ```
 

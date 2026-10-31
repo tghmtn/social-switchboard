@@ -1,60 +1,112 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
+import {
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+  useEffect,
+  useId,
+  useRef,
+} from 'react';
+import { SquareIcon, type SquareIconName } from './components/SquareIcons';
 
-export function Logo({ className = 'size-8' }: { className?: string }) {
+// Small building blocks on top of the theme's component classes (.btn, .card, .chip, .input...).
+
+export function Wordmark({ className = 'text-[22px]' }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
-      <rect width="32" height="32" rx="8" className="fill-orange-600" />
-      <g className="fill-white">
-        <circle cx="9" cy="10" r="3" />
-        <circle cx="23" cy="10" r="3" />
-        <circle cx="9" cy="22" r="3" />
-        <circle cx="23" cy="22" r="3" />
-      </g>
-      <path
-        d="M9 10 C16 10 16 22 23 22"
-        className="stroke-white"
-        strokeWidth="2.5"
-        fill="none"
-        strokeLinecap="round"
-      />
-    </svg>
+    <span className={`wordmark ${className}`}>
+      social <span>switchboard</span>
+    </span>
   );
 }
 
-type FieldProps = InputHTMLAttributes<HTMLInputElement> & {
-  label: string;
-  hint?: string;
-  error?: string;
-};
+type FieldShell = { label: string; hint?: string; error?: string; className?: string };
 
-export function Field({ label, hint, error, id, ...input }: FieldProps) {
-  const inputId = id ?? input.name;
+function Shell({
+  id,
+  label,
+  hint,
+  error,
+  className = '',
+  children,
+}: FieldShell & { id: string; children: ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={inputId} className="block text-sm font-medium">
+    <div className={`grid gap-1.5 ${className}`}>
+      <label htmlFor={id} className="text-sm font-bold">
         {label}
       </label>
-      <input
-        id={inputId}
-        aria-invalid={error ? true : undefined}
-        className="block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm shadow-xs outline-none transition placeholder:text-stone-400 focus:border-orange-500 focus:ring-3 focus:ring-orange-500/20 aria-invalid:border-red-500 dark:border-stone-700 dark:bg-stone-900"
-        {...input}
-      />
+      {children}
       {error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p className="text-[13px] font-bold text-danger">{error}</p>
       ) : hint ? (
-        <p className="text-sm text-stone-500">{hint}</p>
+        <p className="text-[13px] text-muted">{hint}</p>
       ) : null}
     </div>
   );
 }
 
-export function Button({ className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+export function Field({
+  label,
+  hint,
+  error,
+  className,
+  id,
+  ...input
+}: FieldShell & InputHTMLAttributes<HTMLInputElement>) {
+  const auto = useId();
+  const inputId = id ?? auto;
   return (
-    <button
-      className={`inline-flex items-center justify-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white shadow-xs transition hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
-      {...props}
-    />
+    <Shell id={inputId} label={label} hint={hint} error={error} className={className}>
+      <input id={inputId} className="input" aria-invalid={error ? true : undefined} {...input} />
+    </Shell>
+  );
+}
+
+export function TextArea({
+  label,
+  hint,
+  error,
+  className,
+  id,
+  ...input
+}: FieldShell & TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const auto = useId();
+  const inputId = id ?? auto;
+  return (
+    <Shell id={inputId} label={label} hint={hint} error={error} className={className}>
+      <textarea id={inputId} className="input" aria-invalid={error ? true : undefined} {...input} />
+    </Shell>
+  );
+}
+
+export function Select({
+  label,
+  hint,
+  error,
+  className,
+  id,
+  children,
+  ...input
+}: FieldShell & SelectHTMLAttributes<HTMLSelectElement>) {
+  const auto = useId();
+  const inputId = id ?? auto;
+  return (
+    <Shell id={inputId} label={label} hint={hint} error={error} className={className}>
+      <select id={inputId} className="input" {...input}>
+        {children}
+      </select>
+    </Shell>
+  );
+}
+
+export function FormError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p
+      role="alert"
+      className="border-2 border-danger bg-danger-soft px-3 py-2 text-sm font-bold text-danger"
+    >
+      {message}
+    </p>
   );
 }
 
@@ -70,13 +122,10 @@ export function AuthCard({
   return (
     <main className="flex min-h-dvh items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
-        <div className="mb-8 flex items-center gap-3">
-          <Logo className="size-10" />
-          <span className="text-lg font-semibold tracking-tight">Social Switchboard</span>
-        </div>
-        <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8 dark:border-stone-800 dark:bg-stone-900">
-          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">{subtitle}</p>
+        <Wordmark className="mb-8 block text-[26px]" />
+        <div className="card p-6 sm:p-8">
+          <h1 className="font-display text-display-sm font-bold">{title}</h1>
+          <p className="mt-1 text-[15px] text-muted">{subtitle}</p>
           <div className="mt-6">{children}</div>
         </div>
       </div>
@@ -84,22 +133,153 @@ export function AuthCard({
   );
 }
 
-export function FormError({ message }: { message?: string }) {
-  if (!message) return null;
+export function PageHeader({
+  eyebrow,
+  title,
+  actions,
+}: {
+  eyebrow?: string;
+  title: ReactNode;
+  actions?: ReactNode;
+}) {
   return (
-    <p
-      role="alert"
-      className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300"
-    >
-      {message}
-    </p>
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="grid gap-1.5">
+        {eyebrow && <span className="text-label uppercase text-muted">{eyebrow}</span>}
+        <h1 className="font-display text-display-lg font-extrabold">{title}</h1>
+      </div>
+      {actions && <div className="flex flex-wrap gap-3">{actions}</div>}
+    </div>
   );
 }
 
-export function PhaseBadge({ phase }: { phase: number }) {
+export function Stat({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: ReactNode;
+  detail?: ReactNode;
+}) {
   return (
-    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-500 dark:bg-stone-800 dark:text-stone-400">
-      Phase {phase}
+    <div className="card grid content-start gap-1.5">
+      <span className="text-label uppercase text-muted">{label}</span>
+      <span className="font-display text-[40px] font-extrabold leading-none tabular-nums">
+        {value}
+      </span>
+      {detail && <span className="text-[13px] text-muted">{detail}</span>}
+    </div>
+  );
+}
+
+export function EmptyState({
+  icon,
+  title,
+  body,
+  action,
+}: {
+  icon: SquareIconName;
+  title: string;
+  body: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="card card-flat grid justify-items-center gap-3 px-6 py-12 text-center">
+      <SquareIcon name={icon} size={40} />
+      <p className="text-lg font-bold">{title}</p>
+      <div className="max-w-md text-[15px] text-muted">{body}</div>
+      {action}
+    </div>
+  );
+}
+
+export function Toggle({
+  on,
+  onChange,
+  label,
+  disabled,
+}: {
+  on: boolean;
+  onChange: (on: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="tog disabled:cursor-not-allowed disabled:opacity-50"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+    />
+  );
+}
+
+/** A square modal built on <dialog>, which handles focus trapping and Escape for us. */
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    if (open && !d.open) d.showModal();
+    if (!open && d.open) d.close();
+  }, [open]);
+  return (
+    <dialog
+      ref={ref}
+      onClose={onClose}
+      className="m-auto w-[min(640px,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] border-2 border-edge bg-surface p-0 text-ink shadow-hard-xl backdrop:bg-black/60"
+    >
+      <div className="flex items-center justify-between gap-4 border-b-2 border-edge px-5 py-4">
+        <h2 className="font-display text-display-sm font-bold">{title}</h2>
+        <button type="button" className="btn btn-sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="p-5">{children}</div>
+    </dialog>
+  );
+}
+
+/** Two-letter initials in a circle: the theme's one rounded element. */
+export function Avatar({ name, size = 38 }: { name: string; size?: number }) {
+  const initials =
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase())
+      .join('') || '?';
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center rounded-full border-2 border-edge bg-surface-2 text-[13px] font-bold"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      {initials}
     </span>
   );
+}
+
+export function timeAgo(iso: string | null | undefined) {
+  if (!iso) return '—';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 86400 * 30) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(iso).toLocaleDateString();
 }

@@ -1,11 +1,662 @@
+/* =============================================================================
+   SOCIAL SWITCHBOARD — THEME (Tailwind CSS v4)
+   -----------------------------------------------------------------------------
+   From the approved theme package (app/globals.css), adapted for Vite:
+   - Fonts are self-hosted with @fontsource-variable (imported in main.tsx), so
+     --font-fraunces / --font-red-hat-text are set here instead of by next/font.
+   - data-theme is set by src/theme.ts plus a pre-paint script in index.html,
+     instead of next-themes.
+   App-specific additions are at the end of this file, after the theme's own rules.
+   -----------------------------------------------------------------------------
+   How this file is organized (and why):
+
+   1. RAW TOKENS (--sb-*) on :root, redefined for dark mode.
+      These are the single source of truth. Everything else reads from them.
+      Prefix "sb" (switchboard) avoids collisions with Tailwind's own --color-*
+      variables and with any third-party library's CSS variables.
+
+   2. @theme inline { ... } maps raw tokens to Tailwind's theme namespaces.
+      - "inline" matters: without it, Tailwind would emit utilities like
+        `bg-primary { background: var(--color-primary) }` where --color-primary
+        is resolved ONCE at :root. With `inline`, the utility gets the
+        var(--sb-primary) reference directly, so dark-mode overrides on :root
+        flow through with zero extra CSS. This is the v4-recommended pattern
+        for runtime theming.
+      - Result: classes like bg-surface, text-ink, border-edge, shadow-hard,
+        font-display, text-display-lg all exist and are theme-aware.
+
+   3. Base styles (@layer base) and the handful of component classes
+      (@layer components) that are awkward as long utility strings:
+      .btn, .card, .chip, .hl, .tog, .ph, .wordmark.
+
+   Dark mode strategy:
+   - Default follows the OS via prefers-color-scheme.
+   - An explicit choice sets data-theme="light" | "dark" on <html>
+     (src/theme.ts does this, with a pre-paint script in index.html).
+   - Both dark blocks below carry IDENTICAL values. Keep them in sync —
+     or better, only ever edit tokens.json and regenerate.
+   ========================================================================== */
+
 @import "tailwindcss";
 
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+/* Lets you write `dark:` utilities that respect BOTH the OS setting and an
+   explicit data-theme choice. You rarely need dark: at all — tokens flip
+   automatically — but it's here for one-off exceptions. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------------------------------------------------------------------------
+   1. RAW TOKENS — LIGHT (default)
+   ------------------------------------------------------------------------ */
+:root {
+  /* Neutrals: very faint lavender tint in light mode (approved). */
+  --sb-bg: #f6f4ff; /* page background */
+  --sb-surface: #ffffff; /* cards, panels, inputs */
+  --sb-surface-2: #eeeafe; /* table headers, hover fills, kanban lanes */
+  --sb-ink: #17122b; /* primary text */
+  --sb-muted: #5f5878; /* secondary text (6.1:1 on bg, passes AA) */
+  --sb-line: #e2ddf5; /* hairline dividers inside cards */
+  --sb-edge: #17122b; /* the 2px structural border on cards/buttons */
+  --sb-shadow: #17122b; /* hard offset shadow color */
+
+  /* Brand */
+  --sb-primary: #5b2ef0; /* ultraviolet: primary buttons, links, wordmark */
+  --sb-on-primary: #ffffff;
+  --sb-secondary: #d7f75b; /* lime: chips, icon fill, highlighter, small doses ONLY */
+  --sb-on-secondary: #17122b;
+  --sb-accent: #ff8a3d; /* orange: "needs attention" states (negotiating, review, badges) */
+  --sb-on-accent: #17122b;
+
+  /* Semantic status (not brand colors; never use violet/lime for status) */
+  --sb-success: #1d7a46;
+  --sb-success-soft: #ddf5e5;
+  --sb-danger: #b32a23; /* darkened from #C8322B to clear 4.5:1 on danger-soft */
+  --sb-danger-soft: #ffe1dc;
+
+  /* Details */
+  --sb-link: #5b2ef0;
+  --sb-highlight: #d7f75b; /* highlighter stroke behind key words */
+  --sb-icon-fill: #d7f75b; /* duotone icon fill (both icon sets) */
+  --sb-icon-stroke: #17122b; /* Phosphor duotone outline: follows ink, so it flips light in dark mode */
+  --sb-icon-sticker: #17122b; /* custom square icons: outline is ALWAYS dark because the lime fill
+                                covers the whole shape (sticker look in both themes) */
+
+  /* Shape + motion (theme-independent) */
+  --sb-border-width: 2px;
+  --sb-ease: cubic-bezier(0, 0, 0.58, 1); /* = CSS ease-out */
+  --sb-duration: 140ms;
+
+  /* Self-hosted variable fonts (see main.tsx). */
+  --font-fraunces: "Fraunces Variable";
+  --font-red-hat-text: "Red Hat Text Variable";
+
+  /* Fraunces variable axes. SOFT 100 = rounded, Cooper-ish; WONK 1 = quirky alternates. */
+  --sb-display-axes: "SOFT" 100, "WONK" 1;
 }
 
+/* ---------------------------------------------------------------------------
+   RAW TOKENS — DARK
+   Neutral charcoal (NOT purple — tested and rejected). Violet is reserved for
+   actions and links, mirroring light mode.
+   ------------------------------------------------------------------------ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sb-bg: #121214;
+    --sb-surface: #1c1c20;
+    --sb-surface-2: #26262b;
+    --sb-ink: #f4f4f2;
+    --sb-muted: #a6a6af;
+    --sb-line: #2e2e34;
+    --sb-edge: #d9d9de;
+    --sb-shadow: #4a4a54; /* gray, not white (white hard shadows read as glitches) */
+    --sb-primary: #9c80ff; /* lighter violet so it reads on charcoal */
+    --sb-on-primary: #121214;
+    --sb-secondary: #d7f75b;
+    --sb-on-secondary: #17122b;
+    --sb-accent: #ff9a55;
+    --sb-on-accent: #17122b;
+    --sb-success: #5fd08b;
+    --sb-success-soft: #163524;
+    --sb-danger: #ff7a6e;
+    --sb-danger-soft: #3a1a1c;
+    --sb-link: #b9a6ff;
+    --sb-highlight: #4a5a12; /* deep olive-lime; bright lime under light text fails contrast */
+    --sb-icon-fill: #d7f75b;
+    --sb-icon-stroke: #f4f4f2;
+    --sb-icon-sticker: #17122b;
+    color-scheme: dark; /* native scrollbars + form controls follow */
+  }
+}
+:root[data-theme="dark"] {
+  --sb-bg: #121214;
+  --sb-surface: #1c1c20;
+  --sb-surface-2: #26262b;
+  --sb-ink: #f4f4f2;
+  --sb-muted: #a6a6af;
+  --sb-line: #2e2e34;
+  --sb-edge: #d9d9de;
+  --sb-shadow: #4a4a54;
+  --sb-primary: #9c80ff;
+  --sb-on-primary: #121214;
+  --sb-secondary: #d7f75b;
+  --sb-on-secondary: #17122b;
+  --sb-accent: #ff9a55;
+  --sb-on-accent: #17122b;
+  --sb-success: #5fd08b;
+  --sb-success-soft: #163524;
+  --sb-danger: #ff7a6e;
+  --sb-danger-soft: #3a1a1c;
+  --sb-link: #b9a6ff;
+  --sb-highlight: #4a5a12;
+  --sb-icon-fill: #d7f75b;
+  --sb-icon-stroke: #f4f4f2;
+  --sb-icon-sticker: #17122b;
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+   2. TAILWIND THEME MAPPING
+   ------------------------------------------------------------------------ */
+@theme inline {
+  /* Colors -> bg-*, text-*, border-*, ring-*, fill-*, etc.
+     Opacity modifiers (bg-primary/20) still work: v4 uses color-mix(), so
+     hex values behind CSS vars are fine. (In v3 they would NOT be.) */
+  --color-bg: var(--sb-bg);
+  --color-surface: var(--sb-surface);
+  --color-surface-2: var(--sb-surface-2);
+  --color-ink: var(--sb-ink);
+  --color-muted: var(--sb-muted);
+  --color-line: var(--sb-line);
+  --color-edge: var(--sb-edge);
+  --color-primary: var(--sb-primary);
+  --color-on-primary: var(--sb-on-primary);
+  --color-secondary: var(--sb-secondary);
+  --color-on-secondary: var(--sb-on-secondary);
+  --color-accent: var(--sb-accent);
+  --color-on-accent: var(--sb-on-accent);
+  --color-success: var(--sb-success);
+  --color-success-soft: var(--sb-success-soft);
+  --color-danger: var(--sb-danger);
+  --color-danger-soft: var(--sb-danger-soft);
+  --color-link: var(--sb-link);
+  --color-highlight: var(--sb-highlight);
+
+  /* Fonts. --font-fraunces / --font-red-hat-text are set on :root above.
+     Fallbacks are listed in case a font fails to load. */
+  --font-sans: var(--font-red-hat-text), "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font-fraunces), "Cooper Black", Georgia, serif;
+  /* v4 sub-property: every `font-display` utility also gets the axis settings. */
+  --font-display--font-variation-settings: var(--sb-display-axes);
+
+  /* Type scale. Display sizes are fluid; use with font-display.
+     Fraunces only at 24px and up. Below that, use Red Hat Text (font-sans). */
+  --text-display-xl: clamp(2.5rem, 6.4vw, 4.75rem); /* 40 -> 76px: landing hero only */
+  --text-display-xl--line-height: 1.02;
+  --text-display-lg: clamp(2rem, 4.4vw, 3rem); /* 32 -> 48px: page titles, section heads */
+  --text-display-lg--line-height: 1.04;
+  --text-display-md: clamp(1.625rem, 3vw, 2rem); /* 26 -> 32px: H2 */
+  --text-display-md--line-height: 1.08;
+  --text-display-sm: 1.5rem; /* 24px: H2 in dense UI, card titles */
+  --text-display-sm--line-height: 1.1;
+  --text-label: 0.6875rem; /* 11px uppercase labels/chips */
+  --text-label--line-height: 1.2;
+  --text-label--letter-spacing: 0.08em;
+  --text-label--font-weight: 700;
+
+  /* Shadows: the ONE shadow style (hard offset, no blur). */
+  --shadow-hard-sm: 3px 3px 0 var(--sb-shadow);
+  --shadow-hard: 4px 4px 0 var(--sb-shadow); /* default for cards + buttons */
+  --shadow-hard-lg: 6px 6px 0 var(--sb-shadow); /* hover state */
+  --shadow-hard-xl: 8px 8px 0 var(--sb-shadow); /* single hero/featured element per page */
+  --shadow-hard-primary: 8px 8px 0 var(--sb-primary); /* featured pricing plan */
+
+  /* Motion */
+  --ease-snap: var(--sb-ease);
+
+  /* GUARDRAIL: square corners everywhere. Overriding the radius scale to 0
+     means a stray `rounded-lg` (common in copy-pasted snippets and AI output)
+     renders square instead of silently breaking the look.
+     `rounded-full` is NOT part of this scale in v4, so avatars still work. */
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   3a. BASE
+   ------------------------------------------------------------------------ */
 @layer base {
   html {
-    @apply bg-stone-50 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100;
+    -webkit-text-size-adjust: 100%;
   }
+  body {
+    background: var(--sb-bg);
+    color: var(--sb-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+  h1,
+  h2 {
+    text-wrap: balance;
+  }
+  a {
+    color: var(--sb-link);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+  }
+  :focus-visible {
+    outline: 3px solid var(--sb-accent);
+    outline-offset: 3px;
+  }
+  /* Tables of money/stats: tabular figures so columns line up. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0ms !important;
+      animation-duration: 0ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   3b. COMPONENT CLASSES
+   Kept small on purpose. These exist because the press-down interaction and
+   pseudo-element toggles are clumsy as utility strings. Compose freely with
+   Tailwind utilities (e.g. <button class="btn btn-primary w-full">).
+   ------------------------------------------------------------------------ */
+@layer components {
+  /* Wordmark: ALWAYS lowercase, "switchboard" in primary. */
+  .wordmark {
+    font-family: var(--font-display);
+    font-variation-settings: var(--sb-display-axes);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    text-transform: lowercase;
+    white-space: nowrap;
+    color: var(--sb-ink);
+    text-decoration: none;
+  }
+  .wordmark > span {
+    color: var(--sb-primary);
+  }
+
+  /* Buttons. Press-down feel: lift on hover, push into the shadow on click.
+     Only transform + box-shadow animate (compositor-friendly, no layout). */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-weight: 700;
+    font-size: 0.9375rem;
+    line-height: 1;
+    padding: 0.75rem 1.25rem;
+    border: var(--sb-border-width) solid var(--sb-edge);
+    background: var(--sb-surface);
+    color: var(--sb-ink);
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      transform var(--sb-duration) var(--sb-ease),
+      box-shadow var(--sb-duration) var(--sb-ease),
+      background-color var(--sb-duration) var(--sb-ease);
+  }
+  .btn:hover {
+    background: var(--sb-surface-2);
+  }
+  .btn-sm {
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+  }
+  .btn-primary {
+    background: var(--sb-primary);
+    color: var(--sb-on-primary);
+    box-shadow: 4px 4px 0 var(--sb-shadow);
+  }
+  .btn-secondary {
+    background: var(--sb-secondary);
+    color: var(--sb-on-secondary);
+    box-shadow: 4px 4px 0 var(--sb-shadow);
+  }
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .press:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 var(--sb-shadow);
+  }
+  .btn-primary:hover {
+    background: var(--sb-primary);
+  }
+  .btn-secondary:hover {
+    background: var(--sb-secondary);
+  }
+  .btn-primary:active,
+  .btn-secondary:active,
+  .press:active {
+    transform: translate(4px, 4px);
+    box-shadow: 0 0 0 var(--sb-shadow);
+  }
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* Clickable card/tile: add .press to any element with a hard shadow. */
+  .press {
+    cursor: pointer;
+    transition:
+      transform var(--sb-duration) var(--sb-ease),
+      box-shadow var(--sb-duration) var(--sb-ease);
+  }
+
+  /* Card: white surface, 2px edge, 4px hard shadow. Use .card-flat inside other cards. */
+  .card {
+    background: var(--sb-surface);
+    border: var(--sb-border-width) solid var(--sb-edge);
+    box-shadow: 4px 4px 0 var(--sb-shadow);
+    padding: 1.125rem;
+    min-width: 0;
+  }
+  .card-flat {
+    box-shadow: none;
+  }
+
+  /* Chips / status labels: 11px uppercase bold, 2px border, square. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-weight: 700;
+    font-size: 0.6875rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0.1875rem 0.5rem;
+    border: var(--sb-border-width) solid var(--sb-edge);
+    background: transparent;
+    color: var(--sb-ink);
+    white-space: nowrap;
+  }
+  .chip-lime {
+    background: var(--sb-secondary);
+    color: var(--sb-on-secondary);
+  }
+  .chip-orange {
+    background: var(--sb-accent);
+    color: var(--sb-on-accent);
+  }
+  .chip-violet {
+    background: var(--sb-primary);
+    color: var(--sb-on-primary);
+  }
+  .chip-success {
+    background: var(--sb-success-soft);
+    color: var(--sb-success);
+    border-color: var(--sb-success);
+  }
+  .chip-danger {
+    background: var(--sb-danger-soft);
+    color: var(--sb-danger);
+    border-color: var(--sb-danger);
+  }
+
+  /* Highlighter stroke behind 1-2 key words per section. This is the main way
+     color enters headlines (instead of painted background bands). */
+  .hl {
+    background: linear-gradient(transparent 56%, var(--sb-highlight) 56% 94%, transparent 94%);
+    padding: 0 0.06em;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone; /* wraps cleanly across lines */
+  }
+
+  /* Toggle switch: square, snappy. Use on a <button role="switch" aria-checked>. */
+  .tog {
+    width: 48px;
+    height: 26px;
+    flex: none;
+    padding: 0;
+    position: relative;
+    cursor: pointer;
+    border: var(--sb-border-width) solid var(--sb-edge);
+    background: var(--sb-surface);
+    transition: background-color var(--sb-duration) var(--sb-ease);
+  }
+  .tog::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background: var(--sb-ink);
+    transition:
+      left var(--sb-duration) var(--sb-ease),
+      background-color var(--sb-duration) var(--sb-ease);
+  }
+  .tog[aria-checked="true"] {
+    background: var(--sb-secondary);
+  }
+  .tog[aria-checked="true"]::after {
+    left: 24px;
+    background: #17122b;
+  }
+
+  /* Framed photo: border + hard shadow. NEVER recolor/filter creator content. */
+  .ph {
+    border: var(--sb-border-width) solid var(--sb-edge);
+    box-shadow: 4px 4px 0 var(--sb-shadow);
+    overflow: hidden;
+    max-width: 100%;
+  }
+  .ph > img,
+  .ph > video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* Duotone icons (Phosphor weight="duotone"). Phosphor draws the secondary
+     layer at opacity 0.2 of currentColor; we repaint it solid lime and set the
+     outline to the icon-stroke token. Wrap icons in .icon (see components/Icon.tsx). */
+  .icon {
+    color: var(--sb-icon-stroke);
+    flex: none;
+  }
+  .icon [opacity="0.2"] {
+    fill: var(--sb-icon-fill);
+    opacity: 1;
+  }
+  /* Plain line icons (arrows, chevrons) follow text color instead. */
+  .icon-line {
+    color: currentColor;
+    flex: none;
+  }
+  /* Custom square "sticker" icons (components/SquareIcons.tsx): whole shape
+     filled lime, details drawn in a dark stroke that never flips. */
+  .icon-sq {
+    flex: none;
+  }
+  .icon-sq .f {
+    fill: var(--sb-icon-fill);
+    stroke: var(--sb-icon-sticker);
+  }
+  .icon-sq .d {
+    fill: none;
+    stroke: var(--sb-icon-sticker);
+  }
+}
+
+/* =============================================================================
+   APP ADDITIONS
+   Pieces the theme package doesn't cover, built from its tokens and rules:
+   square, 2px edges, hard shadows, no color fills on large areas.
+   ========================================================================== */
+@layer components {
+  /* Form controls: square, 2px edge, surface fill. Focus uses the base orange outline. */
+  .input {
+    display: block;
+    width: 100%;
+    font: inherit;
+    font-size: 0.9375rem;
+    line-height: 1.4;
+    padding: 0.5625rem 0.75rem;
+    background: var(--sb-surface);
+    color: var(--sb-ink);
+    border: var(--sb-border-width) solid var(--sb-edge);
+    border-radius: 0;
+  }
+  .input::placeholder {
+    color: var(--sb-muted);
+    opacity: 1;
+  }
+  .input[aria-invalid="true"] {
+    border-color: var(--sb-danger);
+  }
+  textarea.input {
+    resize: vertical;
+    min-height: 4.5rem;
+  }
+  select.input {
+    appearance: none;
+    padding-right: 2rem;
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--sb-ink) 50%),
+      linear-gradient(135deg, var(--sb-ink) 50%, transparent 50%);
+    background-position:
+      calc(100% - 15px) 55%,
+      calc(100% - 10px) 55%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  /* App sidebar nav (matches the approved dashboard sample). */
+  .navlink {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5625rem 0.625rem;
+    color: var(--sb-ink);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    border: var(--sb-border-width) solid transparent;
+    white-space: nowrap;
+    transition: background-color var(--sb-duration) var(--sb-ease);
+  }
+  .navlink:hover {
+    background: var(--sb-surface-2);
+  }
+  .navlink[aria-current="page"] {
+    background: var(--sb-surface-2);
+    border-color: var(--sb-edge);
+    box-shadow: 4px 4px 0 var(--sb-shadow);
+  }
+
+  /* Kanban-style lane / well: surface-2 with a hairline border. */
+  .lane {
+    background: var(--sb-surface-2);
+    border: var(--sb-border-width) solid var(--sb-line);
+    padding: 0.625rem;
+  }
+
+  /* Chat bubbles in the simulator. */
+  .bubble {
+    max-width: 85%;
+    padding: 0.625rem 0.75rem;
+    border: var(--sb-border-width) solid var(--sb-edge);
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .bubble-bot {
+    background: var(--sb-surface);
+    box-shadow: 3px 3px 0 var(--sb-shadow);
+  }
+  .bubble-me {
+    background: var(--sb-surface-2);
+    margin-left: auto;
+  }
+
+  /* Ghost link-button: plain text action inside dense UI. */
+  .linkbtn {
+    font-weight: 700;
+    font-size: 0.875rem;
+    color: var(--sb-link);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+  .linkbtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+/* React Flow canvas, themed: square nodes, 2px edges, hard shadows, token colors. */
+.react-flow {
+  --xy-background-color: var(--sb-bg);
+  --xy-edge-stroke: var(--sb-ink);
+  --xy-edge-stroke-width: 2;
+  --xy-edge-stroke-selected: var(--sb-primary);
+  --xy-connectionline-stroke: var(--sb-primary);
+  --xy-connectionline-stroke-width: 2;
+  --xy-handle-background-color: var(--sb-secondary);
+  --xy-handle-border-color: var(--sb-edge);
+  --xy-controls-button-background-color: var(--sb-surface);
+  --xy-controls-button-background-color-hover: var(--sb-surface-2);
+  --xy-controls-button-color: var(--sb-ink);
+  --xy-controls-button-border-color: var(--sb-edge);
+  --xy-minimap-background-color: var(--sb-surface);
+  --xy-attribution-background-color: transparent;
+}
+.react-flow__handle {
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  border-width: 2px;
+}
+.react-flow__handle.target {
+  background: var(--sb-surface);
+}
+.react-flow__controls {
+  box-shadow: 4px 4px 0 var(--sb-shadow);
+  border: var(--sb-border-width) solid var(--sb-edge);
+}
+.react-flow__controls-button {
+  border-bottom: var(--sb-border-width) solid var(--sb-edge);
+}
+.react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+.react-flow__node.selected > .flow-node {
+  box-shadow: 6px 6px 0 var(--sb-primary);
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 3;
+}
+
+/* While switching themes, skip transitions for a frame so every control doesn't fade at once. */
+.theme-switching,
+.theme-switching * {
+  transition: none !important;
 }

@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { ApiError, api } from '../api';
-import { AuthCard, Button, Field, FormError } from '../ui';
+import { AuthCard, Field, FormError } from '../ui';
 
 export function Setup({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -57,9 +57,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
           required
           error={errors.workspaceName}
         />
-        <Button type="submit" disabled={busy} className="w-full">
+        <button type="submit" disabled={busy} className="btn btn-primary w-full">
           {busy ? 'Creating…' : 'Create owner account'}
-        </Button>
+        </button>
       </form>
     </AuthCard>
   );
