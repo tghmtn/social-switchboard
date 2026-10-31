@@ -200,16 +200,44 @@ export async function findInstagramAccounts(
   if (found.size === 0) {
     await attempt('debug_token', async () => {
       const data = await get<{
-        data?: { granular_scopes?: { scope: string; target_ids?: string[] }[] };
+        data?: {
+          type?: string;
+          scopes?: string[];
+          granular_scopes?: { scope: string; target_ids?: string[] }[];
+        };
       }>(
         'debug_token',
         { input_token: token, access_token: `${metaAppId}|${metaAppSecret}` },
         false,
       );
-      const ids = (data.data?.granular_scopes ?? [])
+      const granular = data.data?.granular_scopes ?? [];
+      // What the login actually granted, for the logs: permission names and how many assets each covers.
+      notes.push(
+        `granted: type=${data.data?.type ?? '?'} scopes=${(data.data?.scopes ?? []).join(',') || 'none'} targets=${
+          granular.map((g) => `${g.scope}:${g.target_ids?.length ?? 'all'}`).join(',') || 'none'
+        }`,
+      );
+      const ids = granular
         .filter((g) => g.scope.startsWith('instagram_'))
         .flatMap((g) => g.target_ids ?? []);
       return [...new Set(ids)].map((id) => ({ id }));
+    });
+  }
+  if (found.size === 0) {
+    await attempt('business instagram accounts', async () => {
+      const me = await get<{ client_business_id?: string }>('me', {
+        fields: 'id,client_business_id',
+      });
+      if (!me.client_business_id) return [];
+      const fields = { fields: 'id,username,name,profile_picture_url' };
+      const lists = await Promise.all(
+        ['owned_instagram_accounts', 'instagram_accounts'].map((edge) =>
+          get<{ data?: AssignedAccount[] }>(`${me.client_business_id}/${edge}`, fields)
+            .then((d) => d.data ?? [])
+            .catch(() => []),
+        ),
+      );
+      return lists.flat();
     });
   }
   if (found.size === 0) {
