@@ -1,0 +1,82 @@
+name: social-switchboard
+
+x-app: &app
+  image: social-switchboard:local
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgres://switchboard:${POSTGRES_PASSWORD:?run ./scripts/init-env.sh first}@postgres:5432/switchboard
+    APP_SECRET: ${APP_SECRET:?run ./scripts/init-env.sh first}
+    PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8110}
+    TZ: ${TZ:-UTC}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: switchboard
+      POSTGRES_USER: switchboard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./scripts/init-env.sh first}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U switchboard -d switchboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    <<: *app
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  worker:
+    <<: *app
+    pull_policy: never
+    command: ["node", "dist/worker.js"]
+    volumes:
+      - backups:/backups
+    depends_on:
+      app:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8110}:80"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  # Optional: expose this install through a Cloudflare Tunnel (point the tunnel at http://caddy:80).
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.7
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - caddy
+
+volumes:
+  pgdata:
+  backups:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,10 @@
+{
+	admin off
+}
+
+# SITE_ADDRESS defaults to ":80" (plain HTTP behind HTTP_PORT).
+# Set it to a domain name and Caddy fetches and renews an HTTPS certificate automatically.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

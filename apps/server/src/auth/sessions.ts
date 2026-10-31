@@ -1,0 +1,56 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { and, eq, gt } from 'drizzle-orm';
+import type { Config } from '../config';
+import type { Db } from '../db/client';
+import { sessions, users } from '../db/schema';
+
+export const SESSION_COOKIE = 'ss_session';
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// Sessions used within the last half of their life get extended, so active users stay signed in.
+const RENEW_BELOW_MS = SESSION_TTL_MS / 2;
+
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+export function sessionCookieOptions(config: Pick<Config, 'cookieSecure'>, expiresAt: Date) {
+  return {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: config.cookieSecure,
+    expires: expiresAt,
+  };
+}
+
+export async function createSession(db: Db, userId: string) {
+  const token = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  await db.insert(sessions).values({ id: hashToken(token), userId, expiresAt });
+  return { token, expiresAt };
+}
+
+export async function findSessionUser(db: Db, token: string) {
+  const id = hashToken(token);
+  const [row] = await db
+    .select({
+      sessionExpiresAt: sessions.expiresAt,
+      id: users.id,
+      email: users.email,
+      name: users.name,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .where(and(eq(sessions.id, id), gt(sessions.expiresAt, new Date())));
+  if (!row) return null;
+
+  const { sessionExpiresAt, ...user } = row;
+  let expiresAt = sessionExpiresAt;
+  if (expiresAt.getTime() - Date.now() < RENEW_BELOW_MS) {
+    expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+    await db.update(sessions).set({ expiresAt }).where(eq(sessions.id, id));
+  }
+  return { user, expiresAt };
+}
+
+export async function deleteSession(db: Db, token: string) {
+  await db.delete(sessions).where(eq(sessions.id, hashToken(token)));
+}
