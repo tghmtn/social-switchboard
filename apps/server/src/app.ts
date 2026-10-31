@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth';
 import { contactRoutes } from './routes/contacts';
 import { flowRoutes } from './routes/flows';
 import { healthRoutes } from './routes/health';
+import { legalRoutes } from './routes/legal';
 import { libraryRoutes } from './routes/library';
 import { overviewRoutes } from './routes/overview';
 import { simulatorRoutes } from './routes/simulator';
@@ -88,6 +89,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
   };
   await app.register(healthRoutes(deps), { prefix: '/api' });
   await app.register(authRoutes(deps), { prefix: '/api' });
+  await app.register(legalRoutes(routeDeps));
   for (const routes of [
     contactRoutes,
     libraryRoutes,

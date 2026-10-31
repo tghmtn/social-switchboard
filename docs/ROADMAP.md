@@ -121,7 +121,10 @@ Each phase ends with something you can actually use.
 > - Server: contacts, fields, tags, consent, the timeline and CSV export; flows with draft/publish versions; triggers; the simulator API.
 > - Runtime: a per-contact lock, and an outbox so messages are never lost or sent twice. The worker fires delays and reply timeouts.
 > - The WORKSHOP scenario passes end to end over the API, and in the Docker stack with a real worker-fired delay.
-> - **Still to do:** the builder canvas, and the Contacts and Simulator screens. Simulator "test" versions also pile up and need pruning eventually.
+> - **UI done (2026-10-31):** the approved theme package, the visual builder (React Flow) with inspector, triggers, autosave and publish, the Simulator (page and builder tab), Contacts list and detail, Settings.
+> - **Still to do:** simulator "test" versions pile up and need pruning eventually.
+>
+> **Phase 0 leftovers done (2026-10-31):** the public privacy page (`/privacy`) and Meta's signed data-deletion callback (`/api/meta/data-deletion`, with a status page at `/data-deletion?code=`).
 
 - **Contacts:**
   - profile and per-channel identities

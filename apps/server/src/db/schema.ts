@@ -372,3 +372,15 @@ export const messages = pgTable(
     index('messages_queued_idx').on(t.createdAt).where(sql`${t.status} = 'queued'`),
   ],
 );
+
+// ---------------------------------------------------------------- compliance
+
+/** Data-deletion requests from Meta's callback, so the person can check the status page. */
+export const deletionRequests = pgTable('deletion_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  confirmationCode: text('confirmation_code').notNull().unique(),
+  channel: text('channel').notNull(),
+  externalId: text('external_id').notNull(),
+  contactsDeleted: integer('contacts_deleted').notNull(),
+  createdAt: createdAt(),
+});

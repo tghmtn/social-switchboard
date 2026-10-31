@@ -8,6 +8,8 @@ x-app: &app
     APP_SECRET: ${APP_SECRET:?run ./scripts/init-env.sh first}
     PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8110}
     TZ: ${TZ:-UTC}
+    META_APP_SECRET: ${META_APP_SECRET:-}
+    PRIVACY_CONTACT: ${PRIVACY_CONTACT:-}
 
 services:
   postgres:

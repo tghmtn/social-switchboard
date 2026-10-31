@@ -35,6 +35,15 @@ Backups run nightly at 03:30 (container time zone, `TZ` in `.env`). The last 14 
 - **Your own domain, ports 80/443 open:** set `SITE_ADDRESS=your.domain` in `.env` and publish ports 80 and 443 for the `caddy` service. Caddy gets the HTTPS certificate automatically.
 - **Behind home NAT:** create a Cloudflare Tunnel that points to `http://caddy:80`. Put its token in `TUNNEL_TOKEN` and run `docker compose --profile tunnel up -d`.
 
+### Meta app settings
+
+Meta asks for these URLs when you create your Meta app. Every install serves its own:
+
+| Meta setting | URL |
+|---|---|
+| Privacy policy URL | `<PUBLIC_URL>/privacy` |
+| Data deletion callback URL | `<PUBLIC_URL>/api/meta/data-deletion` (set `META_APP_SECRET` in `.env` first) |
+
 ## Develop
 
 ```bash

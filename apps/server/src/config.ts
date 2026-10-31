@@ -17,6 +17,10 @@ const envSchema = z.object({
   BACKUP_CRON: z.string().default('30 3 * * *'),
   TZ: z.string().default('UTC'),
   APP_VERSION: z.string().default('dev'),
+  /** Meta app secret: verifies Meta's signed callbacks (data deletion now, webhooks in Phase 2). */
+  META_APP_SECRET: z.string().optional(),
+  /** Shown on the public privacy page as the way to reach whoever runs this install. */
+  PRIVACY_CONTACT: z.string().optional(),
 });
 
 export type Config = ReturnType<typeof loadConfig>;
@@ -50,6 +54,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     backupCron: e.BACKUP_CRON,
     timeZone: e.TZ,
     version: e.APP_VERSION,
+    metaAppSecret: e.META_APP_SECRET || undefined,
+    privacyContact: e.PRIVACY_CONTACT || undefined,
     migrationsDir: resolve(here, '../drizzle'),
     webDist: resolve(here, '../../web/dist'),
   };
