@@ -35,7 +35,8 @@ Several MIT-licensed open-source projects already cover parts of this. Each one 
 - **Build our own lean platform, borrowing heavily** from ChatbotX's MIT parts and from OpenReply. We're not forking or adopting either one. We get one clean license with nothing paid, a small stack (4 containers that fit a $6 VPS or a home server), a setup wizard aimed at non-developers, and an architecture that's ours.
 - **License: AGPL-3.0.** Anyone can use, deploy and modify it for free. Anyone who hosts a *modified* version for other people must share their changes, so it can't be closed up into a subscription product.
 - **Stack:** TypeScript end-to-end (see below).
-- **Pilot:** the maintainer's own Instagram and their spouse's. Having two accounts is ideal: post on one and comment from the other.
+- **Pilot:** build and test on the maintainer's own account (`tgharring`, switched to Creator), with their spouse's account as the test commenter. The spouse's business account currently runs on ManyChat, so it moves over on a planned cutover day once Phase 2 is solid (see Phase 2).
+- **Domain for this install:** `switchboard.gharring.com`, through a Cloudflare Tunnel.
 
 ## Borrowing rules
 
@@ -51,7 +52,7 @@ MIT code may be copied into this AGPL project, but its copyright notice has to c
 
 ## Meta / Instagram access (good news for self-hosting)
 
-- **For your own Instagram account(s):** create your own Meta developer app, keep it in development mode and add your account as a tester. That's enough to auto-DM *anyone* who comments, with **no App Review and no business verification.** This is per OpenReply's documented setup; we confirm it ourselves in Phase 0.
+- **For your own Instagram account(s):** create your own Meta developer app, add your account as an Instagram tester, and **publish the app (Live)**. Auto-DMing *anyone* who comments needs **no App Review and no business verification** for tester accounts, but Meta only sends real comment events to published apps; in development mode only the dashboard's test button fires. Publishing requires public privacy, terms and data-deletion URLs. (Corrected 2026-10-31 from OpenReply's setup guide; development mode alone is not enough.)
 - **App Review and Business Verification** (which needs a registered legal business) are only needed when one install connects *other people's* accounts, e.g. an agency.
 - So the open-source model is that **every deployer creates their own Meta app.** Our job is a setup wizard that makes that painless: it shows the exact callback URLs, the webhook verify token, the fields to subscribe and the permissions to add.
 - Every install needs a **public HTTPS URL** for webhooks. We ship two options: a Cloudflare Tunnel (how this server already works) or Caddy with a domain.
@@ -181,6 +182,15 @@ Each phase ends with something you can actually use.
 - A read-only transcript per contact.
 - **Borrow from:** OpenReply (Meta client, webhook handling, rate limiter, follow gate, setup docs) and ChatbotX `integrations/instagram`.
 
+- **"Connect Instagram" wizard on the Channels page (moved here from Phase 8, 2026-10-31).** Most deployers will never get through Meta's dashboard alone, so the app walks them through it:
+  - every step with the exact clicks
+  - the redirect, webhook, privacy, terms and data-deletion URLs pre-filled for this install, with copy buttons
+  - app IDs and secrets pasted into the app and stored encrypted, not edited into `.env`
+  - a live check after each step: "Meta reached your webhook", "connected as @account", or a plain-language reason when it fails (tester invite not accepted, app not published, another tool owns the conversations)
+- **Terms page** (Meta needs it to publish), next to `/privacy` and `/data-deletion`.
+- **Going public safely:** session cookies marked secure per request behind the tunnel (Caddy trusting the tunnel's `X-Forwarded-Proto`), and first-run setup limited to the local network or a one-time setup token.
+- **Moving an account off ManyChat (cutover day):** rebuild its automations here first, test them, then disconnect ManyChat and, in Meta Business Suite → Settings → Integrations → Conversation routing, give this app "Access all conversations" and "Take control of conversations". Otherwise button taps fail with "not the thread owner".
+
 **Done when:** it works live on your own account with real commenters.
 
 ### Phase 3: Inbox & team
@@ -248,7 +258,7 @@ Each channel is a self-contained adapter.
 
 - Versioned images on GHCR and a one-line `install.sh`.
 - `upgrade` takes an automatic backup, then runs migrations. A `restore` command to go with it.
-- A setup wizard that walks through creating the Meta app step by step.
+- The Meta setup wizard moved to Phase 2; here it gets polish (screenshots, translations).
 - Multiple workspaces (agencies running several clients), audit log, 2FA, encryption-key rotation.
 - Docs site, contributor guide, `THIRD_PARTY_NOTICES` crediting borrowed MIT code.
 - Telemetry: none, or strictly opt-in.
@@ -302,7 +312,7 @@ social-switchboard/
 
 ## Open decisions
 
-1. **Which account is automated first** in Phase 2, and is it already a Creator/Business account? The other account plays the commenter.
+1. **Brittany's ManyChat automations:** list what they do (keywords, messages, links, email capture). That list is the cutover checklist and sets Phase 2 priorities.
 
 ## Reference scenario: WORKSHOP
 
