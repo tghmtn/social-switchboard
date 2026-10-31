@@ -31,7 +31,23 @@ export function Setup({ onDone }: { onDone: () => void }) {
     >
       <form onSubmit={submit} className="space-y-4" noValidate>
         <FormError message={formError} />
-        <Field label="Your name" name="name" autoComplete="name" required error={errors.name} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="First name"
+            name="firstName"
+            autoComplete="given-name"
+            required
+            maxLength={60}
+            error={errors.firstName}
+          />
+          <Field
+            label="Last name"
+            name="lastName"
+            autoComplete="family-name"
+            maxLength={60}
+            error={errors.lastName}
+          />
+        </div>
         <Field
           label="Email"
           name="email"

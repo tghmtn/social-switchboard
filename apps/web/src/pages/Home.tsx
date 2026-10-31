@@ -11,7 +11,7 @@ const greeting = () => {
 
 export function Home({ me }: { me: Me }) {
   const { data: o } = useApi<Overview>('/overview');
-  const first = me.user.name.split(/\s+/)[0];
+  const first = me.user.firstName;
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',

@@ -13,10 +13,10 @@ import { notFound, requireWorkspace, who } from './guard';
 
 const CHANNEL = 'simulator';
 const externalIdFor = (user: SessionUser) => `user:${user.id}`;
-const profileFor = (user: SessionUser) => {
-  const [firstName, ...rest] = user.name.trim().split(/\s+/);
-  return { firstName, lastName: rest.join(' ') || undefined };
-};
+const profileFor = (user: SessionUser) => ({
+  firstName: user.firstName,
+  lastName: user.lastName || undefined,
+});
 
 export const simulatorRoutes =
   ({ db, runtime }: RouteDeps): FastifyPluginAsync =>

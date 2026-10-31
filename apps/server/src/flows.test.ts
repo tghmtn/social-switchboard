@@ -75,7 +75,8 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
       method: 'POST',
       url: '/api/setup',
       payload: {
-        name: 'Ada Lovelace',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
         email: 'ada@example.test',
         password: 'a long enough password',
         workspaceName: 'Test',

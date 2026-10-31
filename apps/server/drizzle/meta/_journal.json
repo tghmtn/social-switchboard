@@ -22,6 +22,20 @@
       "when": 1793474904479,
       "tag": "0002_deletion_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793478620575,
+      "tag": "0003_user_first_last_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793478621011,
+      "tag": "0004_drop_user_name",
+      "breakpoints": true
     }
   ]
 }

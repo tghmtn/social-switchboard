@@ -26,7 +26,8 @@ describe.skipIf(!databaseUrl)('API', () => {
   });
 
   const owner = {
-    name: 'Owner',
+    firstName: 'Owner',
+    lastName: 'Person',
     email: 'Owner@Example.com',
     password: 'a long enough password',
     workspaceName: 'My Business',
@@ -49,7 +50,12 @@ describe.skipIf(!databaseUrl)('API', () => {
 
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: owner });
     expect(res.statusCode).toBe(201);
-    expect(res.json().user.email).toBe('owner@example.com');
+    expect(res.json().user).toMatchObject({
+      email: 'owner@example.com',
+      firstName: 'Owner',
+      lastName: 'Person',
+      name: 'Owner Person',
+    });
 
     const me = await app.inject({ url: '/api/me', cookies: cookieFrom(res) });
     expect(me.statusCode).toBe(200);

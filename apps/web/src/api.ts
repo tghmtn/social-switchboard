@@ -6,7 +6,7 @@ import type {
 } from '@social-switchboard/flow';
 import { useCallback, useEffect, useState } from 'react';
 
-export type User = { id: string; email: string; name: string };
+export type User = { id: string; email: string; firstName: string; lastName: string; name: string };
 export type Workspace = { id: string; name: string; role: 'owner' | 'admin' | 'agent' };
 export type Me = { user: User; workspaces: Workspace[] };
 export type Health = { status: string; version: string };

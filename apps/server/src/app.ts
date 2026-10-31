@@ -21,7 +21,14 @@ import { simulatorRoutes } from './routes/simulator';
 import { type ChannelRegistry, defaultChannels } from './runtime/channels';
 import type { RuntimeDeps } from './runtime/runtime';
 
-export type SessionUser = { id: string; email: string; name: string };
+export type SessionUser = {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  name: string;
+};
+
 export type RequestWorkspace = { id: string; role: 'owner' | 'admin' | 'agent'; timeZone: string };
 
 declare module 'fastify' {

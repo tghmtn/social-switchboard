@@ -52,7 +52,7 @@ describe.skipIf(!databaseUrl)('privacy page and data deletion', () => {
       method: 'POST',
       url: '/api/setup',
       payload: {
-        name: 'Owner',
+        firstName: 'Owner',
         email: 'o@example.test',
         password: 'a long enough password',
         workspaceName: 'Most <Likely> Late',

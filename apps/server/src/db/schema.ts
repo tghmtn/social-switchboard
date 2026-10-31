@@ -43,7 +43,8 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   // Stored lowercased; uniqueness is enforced on that form.
   email: text('email').notNull().unique(),
-  name: text('name').notNull(),
+  firstName: text('first_name').notNull().default(''),
+  lastName: text('last_name').notNull().default(''),
   passwordHash: text('password_hash').notNull(),
   createdAt: createdAt(),
 });

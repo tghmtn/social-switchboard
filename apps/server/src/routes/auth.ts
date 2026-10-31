@@ -6,6 +6,7 @@ import { getDummyHash, hashPassword, verifyPassword } from '../auth/password';
 import {
   createSession,
   deleteSession,
+  publicUser,
   SESSION_COOKIE,
   sessionCookieOptions,
 } from '../auth/sessions';
@@ -19,7 +20,8 @@ const email = z
   .max(254)
   .transform((s) => s.toLowerCase());
 const setupBody = z.object({
-  name: z.string().trim().min(1, 'Enter your name.').max(100),
+  firstName: z.string().trim().min(1, 'Enter your first name.').max(60),
+  lastName: z.string().trim().max(60).default(''),
   email,
   password: z.string().min(10, 'Use at least 10 characters.').max(200),
   workspaceName: z.string().trim().min(1, 'Give your workspace a name.').max(100),
@@ -53,8 +55,18 @@ export const authRoutes =
 
         const [created] = await tx
           .insert(users)
-          .values({ email: body.email, name: body.name, passwordHash })
-          .returning({ id: users.id, email: users.email, name: users.name });
+          .values({
+            email: body.email,
+            firstName: body.firstName,
+            lastName: body.lastName,
+            passwordHash,
+          })
+          .returning({
+            id: users.id,
+            email: users.email,
+            firstName: users.firstName,
+            lastName: users.lastName,
+          });
         const [workspace] = await tx
           .insert(workspaces)
           .values({ name: body.workspaceName, timeZone: config.timeZone })
@@ -68,7 +80,7 @@ export const authRoutes =
       if (!user) return reply.code(409).send({ error: 'already_set_up' });
 
       reply.setCookie(SESSION_COOKIE, ...(await startSession(user.id)));
-      return reply.code(201).send({ user });
+      return reply.code(201).send({ user: publicUser(user) });
     });
 
     app.post('/auth/login', { config: authRateLimit }, async (req, reply) => {
@@ -78,7 +90,7 @@ export const authRoutes =
       if (!user || !ok) return reply.code(401).send({ error: 'invalid_credentials' });
 
       reply.setCookie(SESSION_COOKIE, ...(await startSession(user.id)));
-      return { user: { id: user.id, email: user.email, name: user.name } };
+      return { user: publicUser(user) };
     });
 
     app.post('/auth/logout', async (req, reply) => {
