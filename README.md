@@ -27,6 +27,7 @@ Open <http://localhost:8110>. The first visit asks you to create the owner accou
 | `make logs` | Follow app and worker logs |
 | `make backup` | Take a database backup now (saved in the `backups` volume) |
 | `make down` | Stop (data is kept) |
+| `make reset-password EMAIL=you@example.com` | Forgot your password? Set a new one (typed hidden, twice); signs that account out everywhere |
 
 Backups run nightly at 03:30 (container time zone, `TZ` in `.env`). The last 14 are kept.
 
