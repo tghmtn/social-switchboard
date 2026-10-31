@@ -182,12 +182,23 @@ Each phase ends with something you can actually use.
 - A read-only transcript per contact.
 - **Borrow from:** OpenReply (Meta client, webhook handling, rate limiter, follow gate, setup docs) and ChatbotX `integrations/instagram`.
 
-- **"Connect Instagram" wizard on the Channels page (moved here from Phase 8, 2026-10-31).** Most deployers will never get through Meta's dashboard alone, so the app walks them through it:
-  - every step with the exact clicks, starting before Meta: switching the Instagram account to Creator/Business, registering as a Meta developer, creating the app, adding and accepting the tester invite
-  - checks the app can do for itself, like reading the connected account's type (personal accounts get walked back to the switch step)
-  - the redirect, webhook, privacy, terms and data-deletion URLs pre-filled for this install, with copy buttons
-  - app IDs and secrets pasted into the app and stored encrypted, not edited into `.env`
-  - a live check after each step: "Meta reached your webhook", "connected as @account", or a plain-language reason when it fails (tester invite not accepted, app not published, another tool owns the conversations)
+- **"Connect Instagram" wizard on the Channels page (moved here from Phase 8, 2026-10-31).** Most deployers will never get through Meta's dashboard alone, so the app walks them through it. Built in three layers (decided 2026-10-31):
+  1. **Steps and live checks, in code.** This layer works for everyone, with no AI key.
+     - It starts before Meta: switching the Instagram account to Creator/Business, registering as a Meta developer, creating the app, adding and accepting the tester invite.
+     - The redirect, webhook, privacy, terms and data-deletion URLs are pre-filled for this install, with copy buttons.
+     - App IDs and secrets are pasted into the app and stored encrypted, not edited into `.env`.
+     - After each step the app checks what it can for itself: "Meta reached your webhook", "connected as @account (Creator)". When a check fails it explains why in plain language: tester invite not accepted, account still personal, app not published, another tool owns the conversations.
+  2. **A guide that updates without AI.** The step text lives in `docs/guides/connect-instagram.md` in this repo, not baked into the app. The wizard shows the copy bundled with the app, and (with a setting to turn it off) fetches the latest version from GitHub. When Meta moves a button, one fix to that file reaches every install without an upgrade, and anyone can submit the fix.
+  3. **An optional "I'm stuck" helper (Phase 4, when the AI key setting arrives).** If the owner has added a Claude or OpenAI key, they can describe or screenshot what they see. The assistant gets the current guide, their screenshot and a search of Meta's docs, then says what to click. It is never required, and never the only source of the steps: a model's knowledge of Meta's screens is as dated as its training.
+- **Fixed URL paths** (so values entered at Meta stay valid). With `<PUBLIC_URL>` = e.g. `https://switchboard.gharring.com`:
+
+  | Meta setting | Path |
+  |---|---|
+  | OAuth redirect URI | `/api/instagram/callback` |
+  | Deauthorize callback | `/api/instagram/deauthorize` |
+  | Data deletion request | `/api/meta/data-deletion` (built) |
+  | Webhook callback | `/api/instagram/webhook` |
+  | Privacy / terms | `/privacy` (built) / `/terms` |
 - **Terms page** (Meta needs it to publish), next to `/privacy` and `/data-deletion`.
 - **Going public safely:** session cookies marked secure per request behind the tunnel (Caddy trusting the tunnel's `X-Forwarded-Proto`), and first-run setup limited to the local network or a one-time setup token.
 - **Moving an account off ManyChat (cutover day):** rebuild its automations here first, test them, then disconnect ManyChat and, in Meta Business Suite → Settings → Integrations → Conversation routing, give this app "Access all conversations" and "Take control of conversations". Otherwise button taps fail with "not the thread owner".
@@ -219,6 +230,7 @@ Each phase ends with something you can actually use.
   - guardrails
 - **AI intent router** as a condition ("what is this message asking for?") that branches the flow.
 - AI-suggested replies in the inbox. "Describe your flow" produces a draft canvas.
+- The "I'm stuck" setup helper (layer 3 of the Phase 2 wizard): screenshot-aware help using the same key setting.
 - **Providers:** the Claude API by default, bring-your-own-key. A provider interface so a local model can be plugged in (Ollama; this box already runs open-webui).
 - A usage/cost meter, and a log of each AI decision for review.
 
