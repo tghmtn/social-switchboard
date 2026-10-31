@@ -116,6 +116,8 @@ export const contactIdentities = pgTable(
       .notNull()
       .references(() => contacts.id, { onDelete: 'cascade' }),
     username: text('username'),
+    /** The connected account this person talks to, e.g. our Instagram account's id. */
+    accountRef: text('account_ref'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -330,12 +332,23 @@ export const runSteps = pgTable(
 
 // ---------------------------------------------------------------- messages
 
-export type InboundContent = { kind: 'in'; text?: string; payload?: string; ref?: string };
+export type InboundContent = {
+  kind: 'in';
+  text?: string;
+  payload?: string;
+  ref?: string;
+  /** Set when this was a public comment rather than a DM. Comments don't open the DM window. */
+  comment?: { id: string; mediaId?: string };
+};
 /** `payloads` maps each quick reply / flow button id to the opaque payload the channel echoes back. */
 export type OutboundContent = {
   kind: 'out';
   message: OutboundMessage;
   payloads: Record<string, string>;
+  /** Send as Instagram's one private reply to this comment, instead of a normal DM. */
+  privateReplyTo?: string;
+  /** A public reply posted under this comment (not a DM). */
+  publicReplyTo?: string;
 };
 
 export const messageDirection = pgEnum('message_direction', ['in', 'out']);
@@ -365,6 +378,8 @@ export const messages = pgTable(
     nodeId: text('node_id'),
     /** Why a send failed or was blocked (e.g. outside the 24-hour window). */
     error: text('error'),
+    /** The channel's own id for this message (Instagram's message id), once sent or received. */
+    externalId: text('external_id'),
     createdAt: createdAt(),
     sentAt: timestamp('sent_at', { withTimezone: true }),
   },
@@ -385,3 +400,60 @@ export const deletionRequests = pgTable('deletion_requests', {
   contactsDeleted: integer('contacts_deleted').notNull(),
   createdAt: createdAt(),
 });
+
+// ---------------------------------------------------------------- instagram
+
+/** The workspace's Meta app: pasted in through the Connect Instagram wizard. Secrets are encrypted. */
+export const metaApps = pgTable('meta_apps', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  instagramAppId: text('instagram_app_id'),
+  instagramAppSecretEnc: text('instagram_app_secret_enc'),
+  facebookAppSecretEnc: text('facebook_app_secret_enc'),
+  /** Random string Meta echoes back when it verifies the webhook URL. */
+  webhookVerifyToken: text('webhook_verify_token').notNull(),
+  webhookVerifiedAt: timestamp('webhook_verified_at', { withTimezone: true }),
+  /** Last signed event from Meta; proves webhooks really arrive (i.e. the app is published). */
+  lastWebhookAt: timestamp('last_webhook_at', { withTimezone: true }),
+  updatedAt: updatedAt(),
+});
+
+export const instagramAccounts = pgTable(
+  'instagram_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: workspaceId(),
+    /** The professional account id Instagram uses in webhooks (entry.id) and for sending. */
+    igUserId: text('ig_user_id').notNull().unique(),
+    username: text('username'),
+    name: text('name'),
+    profilePictureUrl: text('profile_picture_url'),
+    accountType: text('account_type'),
+    accessTokenEnc: text('access_token_enc').notNull(),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+    status: text('status').notNull().default('connected'),
+    /** Plain-language reason when status isn't "connected". */
+    statusDetail: text('status_detail'),
+    connectedAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('instagram_accounts_workspace_idx').on(t.workspaceId)],
+);
+
+/** Raw webhook deliveries, stored before processing so none are lost if processing fails. */
+export const webhookEvents = pgTable(
+  'webhook_events',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    source: text('source').notNull(),
+    payload: jsonb('payload').$type<unknown>().notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    attempts: integer('attempts').notNull().default(0),
+    error: text('error'),
+  },
+  (t) => [
+    index('webhook_events_pending_idx').on(t.receivedAt).where(sql`${t.processedAt} is null`),
+  ],
+);

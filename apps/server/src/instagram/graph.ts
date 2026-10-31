@@ -1,0 +1,228 @@
+// Instagram API with Instagram Login: OAuth, tokens, profile, messaging and comments.
+// Endpoints and their quirks adapted from OpenReply (MIT), lib/meta/client.ts and
+// lib/meta/oauth.ts; see THIRD_PARTY_NOTICES.md.
+
+export const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION ?? 'v25.0';
+const GRAPH = () => `https://graph.instagram.com/${GRAPH_VERSION}`;
+// Instagram Login authorizes on www.instagram.com (the old api.instagram.com/oauth/authorize
+// belonged to the retired Basic Display API and now 404s); the code exchange stays on api.
+const AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize';
+const TOKEN_URL = 'https://api.instagram.com/oauth/access_token';
+
+export const SCOPES = [
+  'instagram_business_basic',
+  'instagram_business_manage_messages',
+  'instagram_business_manage_comments',
+];
+
+/** Swappable for tests. */
+let http: typeof fetch = (...args) => fetch(...args);
+export function setHttp(impl: typeof fetch) {
+  http = impl;
+}
+
+export class MetaError extends Error {
+  constructor(
+    message: string,
+    readonly code: number,
+    readonly subcode?: number,
+  ) {
+    super(message);
+  }
+
+  /** What to tell a person, for the errors people actually hit. */
+  get friendly(): string {
+    if (this.code === 190)
+      return 'Instagram signed this app out. Reconnect the account on the Channels page.';
+    if (this.subcode === 2534037)
+      return 'Another tool (like ManyChat) owns this conversation. Give this app control in Meta Business Suite → Conversation routing.';
+    if (this.subcode === 2534025 || this.subcode === 2534023)
+      return 'Instagram doesn’t allow a private reply to this comment (it may be too old, already answered, or deleted).';
+    if (this.code === 10 && /window/i.test(this.message))
+      return 'Outside Instagram’s 24-hour messaging window.';
+    if (this.code === 4 || this.code === 17 || this.code === 613)
+      return 'Instagram rate limit reached; it will retry later.';
+    if (/developer role/i.test(this.message))
+      return 'This Instagram account isn’t a tester on your Meta app yet, or hasn’t accepted the invite.';
+    return this.message;
+  }
+}
+
+async function call<T>(res: Response): Promise<T> {
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: { message?: string; code?: number; error_subcode?: number };
+    error_message?: string;
+  };
+  if (!res.ok || data.error) {
+    const err = data.error;
+    let path = '';
+    try {
+      path = ` (${new URL(res.url).pathname})`; // never the query string: it can carry the token
+    } catch {}
+    throw new MetaError(
+      `${err?.message ?? data.error_message ?? `HTTP ${res.status}`}${path}`,
+      err?.code ?? res.status,
+      err?.error_subcode,
+    );
+  }
+  return data as T;
+}
+
+const bearer = (token: string) => ({
+  Authorization: `Bearer ${token}`,
+  'Content-Type': 'application/json',
+});
+
+export function authorizeUrl(appId: string, redirectUri: string, state: string) {
+  const params = new URLSearchParams({
+    client_id: appId,
+    redirect_uri: redirectUri,
+    scope: SCOPES.join(','),
+    response_type: 'code',
+    state,
+  });
+  return `${AUTHORIZE_URL}?${params}`;
+}
+
+export async function exchangeCode(
+  appId: string,
+  appSecret: string,
+  redirectUri: string,
+  code: string,
+) {
+  const body = new URLSearchParams({
+    client_id: appId,
+    client_secret: appSecret,
+    grant_type: 'authorization_code',
+    redirect_uri: redirectUri,
+    code,
+  });
+  const res = await http(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await call<{ access_token: string; user_id: string | number }>(res);
+  return { accessToken: data.access_token, userId: String(data.user_id) };
+}
+
+/** Short-lived (1 hour) token → long-lived (60 days). */
+export async function longLivedToken(appSecret: string, shortToken: string) {
+  const url = new URL(`${GRAPH()}/access_token`);
+  url.searchParams.set('grant_type', 'ig_exchange_token');
+  url.searchParams.set('client_secret', appSecret);
+  url.searchParams.set('access_token', shortToken);
+  const data = await call<{ access_token: string; expires_in?: number }>(await http(url));
+  return { accessToken: data.access_token, expiresIn: data.expires_in ?? 5_184_000 };
+}
+
+export async function refreshToken(token: string) {
+  const url = new URL(`${GRAPH()}/refresh_access_token`);
+  url.searchParams.set('grant_type', 'ig_refresh_token');
+  url.searchParams.set('access_token', token);
+  const data = await call<{ access_token: string; expires_in?: number }>(await http(url));
+  return { accessToken: data.access_token, expiresIn: data.expires_in ?? 5_184_000 };
+}
+
+export type Profile = {
+  user_id: string;
+  username?: string;
+  name?: string;
+  profile_picture_url?: string;
+  account_type?: string;
+};
+
+/** The connected account. `user_id` is the id webhooks use; account_type is BUSINESS or MEDIA_CREATOR. */
+export async function me(token: string): Promise<Profile> {
+  const get = async (fields: string) => {
+    const url = new URL(`${GRAPH()}/me`);
+    url.searchParams.set('fields', fields);
+    return call<Profile>(await http(url, { headers: bearer(token) }));
+  };
+  try {
+    return await get('user_id,username,name,profile_picture_url,account_type');
+  } catch (err) {
+    // Some app setups don't expose account_type; the rest still matters.
+    if (err instanceof MetaError && err.code === 100)
+      return get('user_id,username,name,profile_picture_url');
+    throw err;
+  }
+}
+
+/** Tells Instagram to send this account's comment and message events to our webhook. */
+export async function subscribe(igUserId: string, token: string) {
+  const attempt = async (fields: string[]) =>
+    call<{ success: boolean }>(
+      await http(`${GRAPH()}/${igUserId}/subscribed_apps`, {
+        method: 'POST',
+        headers: bearer(token),
+        body: JSON.stringify({ subscribed_fields: fields }),
+      }),
+    );
+  try {
+    return await attempt(['comments', 'messages', 'messaging_postbacks', 'messaging_referral']);
+  } catch {
+    return attempt(['comments', 'messages']);
+  }
+}
+
+/** A person's username, by the id they message us from. Best effort. */
+export async function lookupUsername(token: string, igsid: string): Promise<string | undefined> {
+  try {
+    const url = new URL(`${GRAPH()}/${igsid}`);
+    url.searchParams.set('fields', 'username,name');
+    const data = await call<{ username?: string; name?: string }>(
+      await http(url, { headers: bearer(token) }),
+    );
+    return data.username;
+  } catch {
+    return undefined;
+  }
+}
+
+export type Recipient = { id: string } | { comment_id: string };
+
+export async function sendMessage(
+  igUserId: string,
+  token: string,
+  recipient: Recipient,
+  message: object,
+) {
+  const res = await http(`${GRAPH()}/${igUserId}/messages`, {
+    method: 'POST',
+    headers: bearer(token),
+    body: JSON.stringify({ recipient, message }),
+  });
+  return call<{ recipient_id?: string; message_id?: string }>(res);
+}
+
+export async function replyToComment(commentId: string, token: string, text: string) {
+  const res = await http(`${GRAPH()}/${commentId}/replies`, {
+    method: 'POST',
+    headers: bearer(token),
+    body: JSON.stringify({ message: text }),
+  });
+  return call<{ id: string }>(res);
+}
+
+export type Media = {
+  id: string;
+  caption?: string;
+  media_type?: string;
+  media_product_type?: string;
+  media_url?: string;
+  thumbnail_url?: string;
+  permalink?: string;
+  timestamp?: string;
+};
+
+export async function recentMedia(token: string, limit = 30): Promise<Media[]> {
+  const url = new URL(`${GRAPH()}/me/media`);
+  url.searchParams.set(
+    'fields',
+    'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp',
+  );
+  url.searchParams.set('limit', String(limit));
+  const data = await call<{ data: Media[] }>(await http(url, { headers: bearer(token) }));
+  return data.data;
+}

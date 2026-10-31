@@ -17,6 +17,7 @@ export type Overview = {
   activeRuns: number;
   sent7d: number;
   leads: number;
+  instagram: number;
 };
 
 export type FlowSummary = {
@@ -58,8 +59,20 @@ export type SimMessage = {
   direction: 'in' | 'out';
   status: 'received' | 'queued' | 'sent' | 'failed' | 'blocked';
   content:
-    | { kind: 'in'; text?: string; payload?: string; ref?: string }
-    | { kind: 'out'; message: OutboundMessage; payloads: Record<string, string> };
+    | {
+        kind: 'in';
+        text?: string;
+        payload?: string;
+        ref?: string;
+        comment?: { id: string; mediaId?: string };
+      }
+    | {
+        kind: 'out';
+        message: OutboundMessage;
+        payloads: Record<string, string>;
+        privateReplyTo?: string;
+        publicReplyTo?: string;
+      };
   error: string | null;
   createdAt: string;
 };
@@ -124,6 +137,46 @@ export type ContactDetail = {
     error: string | null;
   }[];
 };
+export type InstagramMedia = {
+  id: string;
+  caption: string;
+  kind: string;
+  thumbnail?: string;
+  permalink?: string;
+  timestamp?: string;
+};
+export type InstagramAccount = {
+  id: string;
+  igUserId: string;
+  username: string | null;
+  name: string | null;
+  profilePictureUrl: string | null;
+  accountType: string | null;
+  status: 'connected' | 'disconnected' | 'error';
+  statusDetail: string | null;
+  tokenExpiresAt: string | null;
+  connectedAt: string;
+};
+export type InstagramSettings = {
+  publicUrl: string;
+  isPublic: boolean;
+  urls: {
+    oauthRedirect: string;
+    deauthorize: string;
+    dataDeletion: string;
+    webhook: string;
+    privacy: string;
+    terms: string;
+  };
+  instagramAppId: string | null;
+  hasInstagramAppSecret: boolean;
+  hasFacebookAppSecret: boolean;
+  webhookVerifyToken: string;
+  webhookVerifiedAt: string | null;
+  lastWebhookAt: string | null;
+  accounts: InstagramAccount[];
+};
+export type Guide = { markdown: string; source: 'latest' | 'bundled' };
 export type FieldDef = { id: string; key: string; label: string; type: string; options: string[] };
 export type Tag = { id: string; name: string; contacts: number };
 

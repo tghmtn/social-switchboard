@@ -14,11 +14,13 @@ import { authRoutes } from './routes/auth';
 import { contactRoutes } from './routes/contacts';
 import { flowRoutes } from './routes/flows';
 import { healthRoutes } from './routes/health';
+import { instagramPublicRoutes, instagramRoutes } from './routes/instagram';
 import { legalRoutes } from './routes/legal';
 import { libraryRoutes } from './routes/library';
 import { overviewRoutes } from './routes/overview';
 import { simulatorRoutes } from './routes/simulator';
-import { type ChannelRegistry, defaultChannels } from './runtime/channels';
+import type { ChannelRegistry } from './runtime/channels';
+import { allChannels } from './runtime/registry';
 import type { RuntimeDeps } from './runtime/runtime';
 
 export type SessionUser = {
@@ -99,7 +101,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     ...deps,
     runtime: {
       db: deps.db,
-      channels: deps.channels ?? defaultChannels(),
+      channels: deps.channels ?? allChannels(deps.db, config.appSecret),
       now: deps.now,
       log: (msg, fields) => app.log.info(fields ?? {}, msg),
     },
@@ -107,12 +109,14 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
   await app.register(healthRoutes(deps), { prefix: '/api' });
   await app.register(authRoutes(deps), { prefix: '/api' });
   await app.register(legalRoutes(routeDeps));
+  await app.register(instagramPublicRoutes(routeDeps), { prefix: '/api' });
   for (const routes of [
     contactRoutes,
     libraryRoutes,
     flowRoutes,
     simulatorRoutes,
     overviewRoutes,
+    instagramRoutes,
   ]) {
     await app.register(routes(routeDeps), { prefix: '/api' });
   }

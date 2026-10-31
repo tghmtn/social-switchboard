@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
-// Triggers decide which flow a fresh conversation starts. Instagram-specific triggers
-// (comment keywords, story replies) arrive with the Instagram channel in Phase 2.
+// Triggers decide which flow a fresh conversation starts.
 
 export const triggerConfig = z.discriminatedUnion('type', [
   z.object({
@@ -16,6 +15,23 @@ export const triggerConfig = z.discriminatedUnion('type', [
   z.object({ type: z.literal('default_reply') }),
   /** Entry links that carry ?ref=<ref> (e.g. ig.me/m/you?ref=workshop). */
   z.object({ type: z.literal('ref'), ref: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/) }),
+  /**
+   * A comment on a post. The flow's first message goes out as Instagram's one private reply to
+   * that comment; the conversation continues once the person replies or taps a button.
+   */
+  z.object({
+    type: z.literal('comment'),
+    /** Empty: any comment. */
+    keywords: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+    match: z.enum(['exact', 'contains', 'starts_with']).default('contains'),
+    /** Empty: any post. */
+    mediaIds: z
+      .array(z.string().regex(/^[0-9A-Za-z_]{1,64}$/))
+      .max(50)
+      .default([]),
+    /** Optional public replies under the comment; one is picked at random. */
+    publicReplies: z.array(z.string().trim().min(1).max(300)).max(10).default([]),
+  }),
 ]);
 
 export type TriggerConfig = z.infer<typeof triggerConfig>;
@@ -32,7 +48,7 @@ export const normalizeText = (s: string) =>
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export function keywordMatches(
-  config: Extract<TriggerConfig, { type: 'keyword' }>,
+  config: { keywords: string[]; match: 'exact' | 'contains' | 'starts_with' },
   text: string,
 ): boolean {
   const message = normalizeText(text);
@@ -78,5 +94,30 @@ export function matchTrigger<T extends Matchable>(
     ofType('keyword').find((t) => keywordMatches(t.config, text)) ??
     (event.isNewContact ? ofType('welcome')[0] : undefined) ??
     ofType('default_reply')[0]
+  );
+}
+
+export type CommentEvent = { channel: string; text: string; mediaId?: string };
+
+/**
+ * Picks the trigger for a comment. Triggers set up for this specific post win over "any post"
+ * ones; within each group the first match (by position) wins. No keywords means any comment.
+ */
+export function matchCommentTrigger<T extends Matchable>(
+  triggers: T[],
+  event: CommentEvent,
+): T | undefined {
+  const candidates = triggers.filter(
+    (t): t is T & { config: Extract<TriggerConfig, { type: 'comment' }> } =>
+      t.config.type === 'comment' && (!t.channels?.length || t.channels.includes(event.channel)),
+  );
+  const matchesText = (c: Extract<TriggerConfig, { type: 'comment' }>) =>
+    c.keywords.length === 0 || keywordMatches(c, event.text);
+  const forThisPost = candidates.filter(
+    (t) => event.mediaId !== undefined && t.config.mediaIds.includes(event.mediaId),
+  );
+  const anyPost = candidates.filter((t) => t.config.mediaIds.length === 0);
+  return (
+    forThisPost.find((t) => matchesText(t.config)) ?? anyPost.find((t) => matchesText(t.config))
   );
 }

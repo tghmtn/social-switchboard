@@ -30,7 +30,7 @@ SOFTWARE.
 
 ## OpenReply
 
-<https://github.com/diwenne/openreply>
+<https://github.com/diwenne/openreply>. Adapted in `apps/server/src/crypto.ts`, `apps/server/src/instagram/graph.ts` and `apps/server/src/instagram/events.ts` (Instagram API endpoints, token handling, webhook parsing), and in `docs/guides/connect-instagram.md` (Meta setup steps).
 
 ```
 MIT License

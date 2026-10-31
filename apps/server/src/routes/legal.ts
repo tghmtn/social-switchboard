@@ -4,7 +4,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
 import { contactIdentities, contacts, deletionRequests, workspaces } from '../db/schema';
-import { parseSignedRequest } from '../meta';
+import { metaSecrets } from '../instagram/settings';
+import { parseSignedRequestAny } from '../meta';
 
 // Public pages Meta requires before an app can go live: a privacy policy and a data-deletion
 // callback (plus a status page the callback links to). Every install serves its own.
@@ -138,12 +139,15 @@ ${row.contactsDeleted > 0 ? 'Your contact record, messages and conversation hist
 
     /** Meta's data-deletion callback: verify the signature, erase the person, return a status link. */
     app.post('/api/meta/data-deletion', async (req, reply) => {
-      if (!config.metaAppSecret) return reply.code(503).send({ error: 'meta_not_configured' });
+      const secrets = (await metaSecrets(db, config.appSecret, config.metaAppSecret)).map(
+        (x) => x.secret,
+      );
+      if (secrets.length === 0) return reply.code(503).send({ error: 'meta_not_configured' });
       const signed = z
         .object({ signed_request: z.string().min(10).max(10_000) })
         .safeParse(req.body);
       const data = signed.success
-        ? parseSignedRequest(signed.data.signed_request, config.metaAppSecret)
+        ? parseSignedRequestAny(signed.data.signed_request, secrets)
         : null;
       if (!data?.user_id) return reply.code(400).send({ error: 'invalid_signed_request' });
       const userId = String(data.user_id);

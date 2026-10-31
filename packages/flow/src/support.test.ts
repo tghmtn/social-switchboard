@@ -3,7 +3,7 @@ import { parseInput } from './inputs';
 import { flowGraph } from './schema';
 import { STARTERS } from './starters';
 import { nextTimeOfDay, zonedToUtc } from './time';
-import { keywordMatches, matchTrigger, type TriggerConfig } from './triggers';
+import { keywordMatches, matchCommentTrigger, matchTrigger, type TriggerConfig } from './triggers';
 import { validateFlow } from './validate';
 
 describe('validateFlow', () => {
@@ -95,6 +95,44 @@ describe('triggers', () => {
     expect(pick({ channel: 'simulator', text: 'hello', isNewContact: false })).toBe('default');
     expect(pick({ channel: 'simulator', text: 'promo', isNewContact: false })).toBe('default');
     expect(pick({ channel: 'instagram', text: 'promo', isNewContact: false })).toBe('ig-only');
+  });
+});
+
+describe('comment triggers', () => {
+  const comment = (
+    id: string,
+    over: Partial<Extract<TriggerConfig, { type: 'comment' }>> = {},
+  ) => ({
+    id,
+    config: {
+      type: 'comment',
+      keywords: [],
+      match: 'contains',
+      mediaIds: [],
+      publicReplies: [],
+      ...over,
+    } as TriggerConfig,
+  });
+
+  it('prefers triggers for the specific post, then any post, honoring keywords', () => {
+    const triggers = [
+      comment('any-guide', { keywords: ['guide'] }),
+      comment('post-1-any', { mediaIds: ['111'] }),
+      comment('post-2-link', { mediaIds: ['222'], keywords: ['LINK'], match: 'exact' }),
+      {
+        id: 'dm-keyword',
+        config: { type: 'keyword', keywords: ['guide'], match: 'exact' } as TriggerConfig,
+      },
+    ];
+    const pick = (text: string, mediaId?: string) =>
+      matchCommentTrigger(triggers, { channel: 'instagram', text, mediaId })?.id;
+    expect(pick('love this!', '111')).toBe('post-1-any');
+    expect(pick('link!', '222')).toBe('post-2-link');
+    expect(pick('send the guide please', '222')).toBe('any-guide');
+    expect(pick('nice', '333')).toBeUndefined();
+    expect(
+      matchTrigger(triggers, { channel: 'instagram', text: 'love this', isNewContact: false }),
+    ).toBeUndefined();
   });
 });
 

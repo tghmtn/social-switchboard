@@ -35,10 +35,10 @@ export function Home({ me }: { me: Me }) {
       to: '/simulator',
     },
     {
-      done: false,
+      done: (o?.instagram ?? 0) > 0,
       title: 'Connect Instagram',
-      detail: 'Comment-to-DM, DM keywords and story replies arrive in Phase 2.',
-      phase: 2,
+      detail: 'A step-by-step guide walks you through Meta’s setup, checking each step as you go.',
+      to: '/channels',
     },
   ];
 
@@ -107,7 +107,6 @@ export function Home({ me }: { me: Me }) {
                   ) : (
                     <p className="text-lg font-bold">{s.title}</p>
                   )}
-                  {s.phase && <span className="chip">Phase {s.phase}</span>}
                 </div>
                 <p className="mt-0.5 text-[15px] text-muted">{s.detail}</p>
               </div>

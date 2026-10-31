@@ -163,6 +163,15 @@ Each phase ends with something you can actually use.
 
 ### Phase 2: Instagram live
 
+> **Status (2026-10-31): built, waiting on the live Meta connection.**
+> - **Safe public access:** per-request secure cookies, a setup code for first-time setup from outside the network, `/terms`, and `switchboard.gharring.com` live through a Cloudflare Tunnel.
+> - **The Connect Instagram wizard:** layers 1 and 2. Steps, live checks, encrypted secrets and copyable URLs, with the guide text in `docs/guides/connect-instagram.md`, fetched fresh from GitHub.
+> - **Instagram Login OAuth:** long-lived tokens, refreshed daily by the worker. Deauthorize callback.
+> - **Signed webhooks:** stored first, then processed. Covers comments, DMs, quick-reply taps, postbacks and ref links.
+> - **Comment triggers:** keywords, any post or picked posts, and random public replies. The first message is the comment's private reply; anything after it is held, with the reason, until the person writes back. The simulator can send comments too.
+> - **Instagram sending:** text, images, button templates and quick replies, within the 24-hour window, with plain-language errors (thread owner, expired token, window).
+> - **Not yet:** human-takeover detection from Instagram app replies (echoes), story mentions, live comments, follow gate, per-account rate limiting.
+
 **Goal:** someone comments "GUIDE" on a real post and the guide shows up in their DMs.
 
 - **Connect IG** via Instagram Login OAuth. Tokens are encrypted at rest and refreshed automatically.

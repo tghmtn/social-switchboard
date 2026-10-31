@@ -22,7 +22,12 @@ export async function lockContact(tx: Tx, contactId: string) {
   );
 }
 
-export type Profile = { firstName?: string; lastName?: string; username?: string };
+export type Profile = {
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  accountRef?: string;
+};
 
 /** Finds the contact behind a channel identity, creating both on first contact. */
 export async function findOrCreateContact(
@@ -58,6 +63,7 @@ export async function findOrCreateContact(
     externalId,
     contactId: created.id,
     username: profile.username,
+    accountRef: profile.accountRef,
   });
   await recordEvent(tx, workspaceId, created.id, 'contact_created', { channel });
   return { contactId: created.id, isNew: true };

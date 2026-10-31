@@ -2,13 +2,15 @@ import { PgBoss } from 'pg-boss';
 import { listBackups, runBackup } from './backup';
 import { loadConfig } from './config';
 import { createDb } from './db/client';
+import { processWebhookEvents } from './instagram/events';
+import { refreshExpiringTokens } from './instagram/tokens';
 import { log, logError } from './log';
-import { defaultChannels } from './runtime/channels';
+import { allChannels } from './runtime/registry';
 import { deliverStale, type RuntimeDeps, wakeDue } from './runtime/runtime';
 
 const config = loadConfig();
 const { db, pool } = createDb(config.databaseUrl);
-const runtime: RuntimeDeps = { db, channels: defaultChannels(), log };
+const runtime: RuntimeDeps = { db, channels: allChannels(db, config.appSecret), log };
 
 const boss = new PgBoss(config.databaseUrl);
 boss.on('error', (err) => logError('pg-boss error', err));
@@ -20,6 +22,14 @@ await boss.schedule(BACKUP, config.backupCron, null, { tz: config.timeZone });
 await boss.work(BACKUP, async () => {
   const result = await runBackup(config);
   log('backup written', result);
+});
+
+// Instagram tokens last 60 days; keep them fresh.
+const TOKENS = 'instagram-token-refresh';
+await boss.createQueue(TOKENS);
+await boss.schedule(TOKENS, '15 4 * * *', null, { tz: config.timeZone });
+await boss.work(TOKENS, async () => {
+  await refreshExpiringTokens(db, config.appSecret, log);
 });
 
 // A fresh install gets its first backup right away instead of waiting for the nightly run.
@@ -38,6 +48,8 @@ async function tick() {
       if ((await wakeDue(runtime, BATCH)) < BATCH) break;
     }
     if (!stopping) await deliverStale(runtime);
+    // Webhook deliveries the API server couldn't finish (it processes them right away normally).
+    if (!stopping) await processWebhookEvents({ db, runtime, appSecret: config.appSecret });
   } catch (err) {
     logError('flow timer tick failed', err);
   }

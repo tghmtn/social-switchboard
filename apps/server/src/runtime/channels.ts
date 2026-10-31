@@ -1,6 +1,8 @@
 import type { OutboundContent } from '../db/schema';
 
-export type SendResult = { status: 'sent' } | { status: 'failed' | 'blocked'; error: string };
+export type SendResult =
+  | { status: 'sent'; externalId?: string }
+  | { status: 'failed' | 'blocked'; error: string };
 
 /**
  * A messaging channel. Phase 2 adds Instagram, which will also enforce the 24-hour window and
@@ -9,7 +11,12 @@ export type SendResult = { status: 'sent' } | { status: 'failed' | 'blocked'; er
 export interface ChannelAdapter {
   readonly id: string;
   send(
-    target: { workspaceId: string; contactId: string; externalId: string },
+    target: {
+      workspaceId: string;
+      contactId: string;
+      externalId: string;
+      accountRef: string | null;
+    },
     content: OutboundContent,
   ): Promise<SendResult>;
 }

@@ -4,6 +4,7 @@ import {
   advance,
   type EngineEvent,
   type FlowGraph,
+  matchCommentTrigger,
   matchTrigger,
   type RunState,
 } from '@social-switchboard/flow';
@@ -54,6 +55,20 @@ export type Inbound = {
   payload?: string;
   /** Entry-link ref, e.g. from ig.me/m/you?ref=spring. */
   ref?: string;
+  /** Which of our connected accounts this arrived on (e.g. the Instagram account id). */
+  accountRef?: string;
+};
+
+export type InboundComment = {
+  workspaceId: string;
+  channel: string;
+  /** The commenter's id on the channel (the same id they'd DM from). */
+  externalId: string;
+  accountRef?: string;
+  profile?: Profile;
+  commentId: string;
+  mediaId?: string;
+  text: string;
 };
 
 type Version = { id: string; flowId: string; graph: FlowGraph };
@@ -70,6 +85,8 @@ type Ctx = {
   queued: string[];
   /** How many "go to flow" hops this event has taken, to stop flows that call each other forever. */
   hops: number;
+  /** Set when a comment started this: the first message is the comment's one private reply. */
+  commentReply?: { commentId: string; used: boolean };
 };
 
 const MAX_FLOW_HOPS = 5;
@@ -95,7 +112,7 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
       input.workspaceId,
       input.channel,
       input.externalId,
-      input.profile,
+      { ...input.profile, accountRef: input.accountRef },
     );
     await lockContact(tx, contactId);
     const now = deps.now?.() ?? new Date();
@@ -121,6 +138,109 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
   });
   await deliver(deps, queued);
   return { contactId };
+}
+
+/**
+ * Handles a public comment. If a comment trigger matches, its flow starts and the first message
+ * goes out as the comment's one private reply (plus an optional public reply under the comment).
+ */
+export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
+  const queued: string[] = [];
+  const result = await deps.db.transaction(async (tx) => {
+    const { contactId } = await findOrCreateContact(
+      tx,
+      input.workspaceId,
+      input.channel,
+      input.externalId,
+      {
+        ...input.profile,
+        accountRef: input.accountRef,
+      },
+    );
+    await lockContact(tx, contactId);
+    const now = deps.now?.() ?? new Date();
+    const [contact] = await tx
+      .update(contacts)
+      .set({ lastSeenAt: now })
+      .where(eq(contacts.id, contactId))
+      .returning({ pausedAt: contacts.automationPausedAt });
+    await tx.insert(messages).values({
+      workspaceId: input.workspaceId,
+      contactId,
+      channel: input.channel,
+      direction: 'in',
+      status: 'received',
+      content: {
+        kind: 'in',
+        text: input.text,
+        comment: { id: input.commentId, mediaId: input.mediaId },
+      },
+      externalId: input.commentId,
+    });
+    if (contact?.pausedAt) return { contactId, triggered: false };
+
+    const rows = await tx
+      .select({
+        id: triggers.id,
+        config: triggers.config,
+        channels: triggers.channels,
+        versionId: flows.publishedVersionId,
+      })
+      .from(triggers)
+      .innerJoin(flows, eq(flows.id, triggers.flowId))
+      .where(
+        and(
+          eq(triggers.workspaceId, input.workspaceId),
+          eq(triggers.enabled, true),
+          isNull(flows.archivedAt),
+          isNotNull(flows.publishedVersionId),
+        ),
+      )
+      .orderBy(asc(triggers.position), asc(triggers.createdAt));
+    const trigger = matchCommentTrigger(rows, {
+      channel: input.channel,
+      text: input.text,
+      mediaId: input.mediaId,
+    });
+    const version = trigger?.versionId
+      ? await loadVersion(tx, input.workspaceId, trigger.versionId)
+      : undefined;
+    if (!trigger || !version) return { contactId, triggered: false };
+
+    const ctx = await context(deps, tx, input.workspaceId, contactId, input.channel, now, queued);
+    ctx.commentReply = { commentId: input.commentId, used: false };
+    await cancelConversationRuns(ctx);
+    await begin(ctx, version, { type: 'start' }, trigger.id);
+
+    const replies = trigger.config.type === 'comment' ? trigger.config.publicReplies : [];
+    const publicReply = replies[Math.floor(Math.random() * replies.length)];
+    if (publicReply) {
+      const [m] = await tx
+        .insert(messages)
+        .values({
+          workspaceId: input.workspaceId,
+          contactId,
+          channel: input.channel,
+          direction: 'out',
+          status: 'queued',
+          content: {
+            kind: 'out',
+            message: {
+              parts: [{ type: 'text', text: publicReply }],
+              buttons: [],
+              quickReplies: [],
+            },
+            payloads: {},
+            publicReplyTo: input.commentId,
+          },
+        })
+        .returning({ id: messages.id });
+      if (m) queued.push(m.id);
+    }
+    return { contactId, triggered: true };
+  });
+  await deliver(deps, queued);
+  return result;
 }
 
 async function route(ctx: Ctx, input: Inbound, isNew: boolean) {
@@ -270,7 +390,10 @@ export async function deliver(deps: RuntimeDeps, ids: string[]) {
     const [m] = await deps.db.select().from(messages).where(eq(messages.id, id));
     if (m?.status !== 'queued' || m.content.kind !== 'out') continue;
     const [identity] = await deps.db
-      .select({ externalId: contactIdentities.externalId })
+      .select({
+        externalId: contactIdentities.externalId,
+        accountRef: contactIdentities.accountRef,
+      })
       .from(contactIdentities)
       .where(
         and(eq(contactIdentities.contactId, m.contactId), eq(contactIdentities.channel, m.channel)),
@@ -284,7 +407,12 @@ export async function deliver(deps: RuntimeDeps, ids: string[]) {
     else {
       result = await adapter
         .send(
-          { workspaceId: m.workspaceId, contactId: m.contactId, externalId: identity.externalId },
+          {
+            workspaceId: m.workspaceId,
+            contactId: m.contactId,
+            externalId: identity.externalId,
+            accountRef: identity.accountRef,
+          },
           m.content,
         )
         .catch((err: unknown) => ({
@@ -298,6 +426,7 @@ export async function deliver(deps: RuntimeDeps, ids: string[]) {
         status: result.status,
         error: 'error' in result ? result.error : null,
         sentAt: result.status === 'sent' ? new Date() : null,
+        externalId: result.status === 'sent' ? (result.externalId ?? null) : null,
       })
       .where(eq(messages.id, id));
   }
@@ -471,6 +600,10 @@ async function persist(
           payloads[q.id] = encodePayload(run.flowVersionId, e.nodeId, q.id);
         for (const b of e.message.buttons)
           if (b.kind === 'flow') payloads[b.id] = encodePayload(run.flowVersionId, e.nodeId, b.id);
+        // After a comment, Instagram allows one private reply until the person writes back.
+        // Hold anything after it, with the reason, instead of letting Instagram reject it.
+        const reply = ctx.commentReply;
+        const held = reply?.used === true;
         const [m] = await tx
           .insert(messages)
           .values({
@@ -478,13 +611,22 @@ async function persist(
             contactId,
             channel: ctx.channel,
             direction: 'out',
-            status: 'queued',
-            content: { kind: 'out', message: e.message, payloads },
+            status: held ? 'blocked' : 'queued',
+            error: held
+              ? 'Instagram allows one reply to a comment until the person writes back. Put a quick reply or button on the first message so they can continue.'
+              : null,
+            content: {
+              kind: 'out',
+              message: e.message,
+              payloads,
+              ...(reply && !held ? { privateReplyTo: reply.commentId } : {}),
+            },
             runId: run.id,
             nodeId: e.nodeId,
           })
           .returning({ id: messages.id });
-        if (m) ctx.queued.push(m.id);
+        if (reply) reply.used = true;
+        if (m && !held) ctx.queued.push(m.id);
         break;
       }
       case 'add_tag':

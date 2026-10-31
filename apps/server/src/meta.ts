@@ -31,3 +31,11 @@ export function signRequest(data: object, appSecret: string) {
   const sig = createHmac('sha256', appSecret).update(payload).digest('base64url');
   return `${sig}.${payload}`;
 }
+
+export function parseSignedRequestAny(signed: string, secrets: string[]): SignedRequest | null {
+  for (const secret of secrets) {
+    const data = parseSignedRequest(signed, secret);
+    if (data) return data;
+  }
+  return null;
+}

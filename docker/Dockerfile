@@ -29,6 +29,7 @@ COPY apps/server/package.json ./apps/server/
 COPY --from=build /repo/apps/server/dist ./apps/server/dist
 COPY --from=build /repo/apps/server/drizzle ./apps/server/drizzle
 COPY --from=build /repo/apps/web/dist ./apps/web/dist
+COPY docs/guides ./docs/guides
 WORKDIR /app/apps/server
 USER node
 EXPOSE 3000

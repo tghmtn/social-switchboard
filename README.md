@@ -35,14 +35,11 @@ Backups run nightly at 03:30 (container time zone, `TZ` in `.env`). The last 14 
 - **Your own domain, ports 80/443 open:** set `SITE_ADDRESS=your.domain` in `.env` and publish ports 80 and 443 for the `caddy` service. Caddy gets the HTTPS certificate automatically.
 - **Behind home NAT:** create a Cloudflare Tunnel that points to `http://caddy:80`. Put its token in `TUNNEL_TOKEN` and run `docker compose --profile tunnel up -d`.
 
-### Meta app settings
+### Connecting Instagram
 
-Meta asks for these URLs when you create your Meta app. Every install serves its own:
+Open **Channels** in the app. A step-by-step guide walks you through Meta's setup and checks each step as you go: the webhook, the connected account, the first real event. It fills in this install's URLs for you (`<PUBLIC_URL>` must be a public https address), and your Meta app secrets are pasted into the app and stored encrypted.
 
-| Meta setting | URL |
-|---|---|
-| Privacy policy URL | `<PUBLIC_URL>/privacy` |
-| Data deletion callback URL | `<PUBLIC_URL>/api/meta/data-deletion` (set `META_APP_SECRET` in `.env` first) |
+The guide's text lives in [`docs/guides/connect-instagram.md`](docs/guides/connect-instagram.md). Installs fetch the latest version from this repo, so when Meta moves a button, one fix here reaches everyone. To use only the copy bundled with your version, set `GUIDE_UPDATES=off`.
 
 ## Develop
 

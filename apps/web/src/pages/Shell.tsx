@@ -9,7 +9,7 @@ const NAV: { to: string; label: string; icon: SquareIconName; end?: boolean; pha
   { to: '/flows', label: 'Flows', icon: 'flow' },
   { to: '/contacts', label: 'Contacts', icon: 'kit' },
   { to: '/simulator', label: 'Simulator', icon: 'phone' },
-  { to: '/channels', label: 'Channels', icon: 'chat', phase: 2 },
+  { to: '/channels', label: 'Channels', icon: 'chat' },
   { to: '/inbox', label: 'Inbox', icon: 'inbox', phase: 3 },
   { to: '/settings', label: 'Settings', icon: 'sliders' },
 ];

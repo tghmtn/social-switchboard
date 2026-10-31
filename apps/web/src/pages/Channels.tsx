@@ -1,0 +1,445 @@
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import Markdown from 'react-markdown';
+import { useSearchParams } from 'react-router';
+import { ApiError, api, type Guide, type InstagramSettings, useApi } from '../api';
+import { SquareIcon } from '../components/SquareIcons';
+import { Field, FormError, PageHeader, timeAgo } from '../ui';
+import { Page } from './Shell';
+
+// The Connect Instagram wizard. The words come from docs/guides/connect-instagram.md (fetched
+// fresh from the project's repo when possible); the checks, forms and buttons are built in.
+
+type Step = { id: string; title: string; body: string };
+
+function parseGuide(markdown: string): Step[] {
+  return markdown
+    .split(/^## step: /m)
+    .slice(1)
+    .map((chunk) => {
+      const newline = chunk.indexOf('\n');
+      const [id = '', title = ''] = chunk
+        .slice(0, newline)
+        .split('|')
+        .map((s) => s.trim());
+      return { id, title, body: chunk.slice(newline + 1).trim() };
+    })
+    .filter((s) => s.id && s.title);
+}
+
+const DONE_KEY = 'ss-instagram-wizard-done';
+function loadDone(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(DONE_KEY) ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+}
+
+/** Inline value with a copy button; falls back to selecting the text where the clipboard is blocked (plain http). */
+function CopyText({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="inline-flex max-w-full items-stretch border-2 border-edge bg-surface-2 align-middle">
+      <code className="min-w-0 px-2 py-0.5 text-[13px] break-all select-all">{text}</code>
+      <button
+        type="button"
+        className="shrink-0 border-l-2 border-edge px-2 text-[12px] font-bold hover:bg-surface"
+        onClick={async (e) => {
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            const code = e.currentTarget.previousElementSibling;
+            if (code) window.getSelection()?.selectAllChildren(code);
+            return;
+          }
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </span>
+  );
+}
+
+function GuideText({ markdown }: { markdown: string }) {
+  return (
+    <div className="grid gap-3 text-[15px] [&_li]:ml-5 [&_ol]:list-decimal [&_ol]:space-y-1 [&_ul]:list-disc [&_ul]:space-y-1">
+      <Markdown
+        components={{
+          code: ({ children }) => <CopyText text={String(children)} />,
+          blockquote: ({ children }) => (
+            <div className="border-2 border-accent bg-surface px-3 py-2 text-[14px]">
+              {children}
+            </div>
+          ),
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {markdown}
+      </Markdown>
+    </div>
+  );
+}
+
+function Check({ ok, okText, waitText }: { ok: boolean; okText: string; waitText: string }) {
+  return ok ? (
+    <p className="chip chip-success w-fit py-1">✓ {okText}</p>
+  ) : (
+    <p className="chip chip-orange w-fit py-1">{waitText}</p>
+  );
+}
+
+export function Channels() {
+  const settings = useApi<InstagramSettings>('/instagram/settings');
+  const guide = useApi<Guide>('/guides/connect-instagram');
+  const [params, setParams] = useSearchParams();
+  const [done, setDone] = useState<string[]>(loadDone);
+  const [open, setOpen] = useState<string>();
+  const s = settings.data;
+
+  const steps = useMemo(() => {
+    if (!guide.data || !s) return [];
+    const fill: Record<string, string> = {
+      PUBLIC_URL: s.publicUrl,
+      OAUTH_REDIRECT: s.urls.oauthRedirect,
+      DEAUTHORIZE: s.urls.deauthorize,
+      DATA_DELETION: s.urls.dataDeletion,
+      WEBHOOK: s.urls.webhook,
+      VERIFY_TOKEN: s.webhookVerifyToken,
+      PRIVACY: s.urls.privacy,
+      TERMS: s.urls.terms,
+    };
+    return parseGuide(
+      guide.data.markdown.replace(/\{\{([A-Z_]+)\}\}/g, (m, k: string) => fill[k] ?? m),
+    );
+  }, [guide.data, s]);
+
+  const connected = s?.accounts.filter((a) => a.status === 'connected') ?? [];
+  const firstConnectedAt = connected.map((a) => a.connectedAt).sort()[0];
+  const credentialsSaved = Boolean(s?.instagramAppId && s.hasInstagramAppSecret);
+  const proven: Record<string, boolean> = {
+    account: connected.length > 0,
+    developer: credentialsSaved,
+    app: credentialsSaved,
+    credentials: credentialsSaved && Boolean(s?.hasFacebookAppSecret),
+    tester: connected.length > 0,
+    webhooks: Boolean(s?.webhookVerifiedAt),
+    connect: connected.length > 0,
+    publish: Boolean(s?.lastWebhookAt && firstConnectedAt && s.lastWebhookAt > firstConnectedAt),
+  };
+  const isDone = (id: string) => proven[id] === true || done.includes(id);
+  const nextStep = steps.find((st) => !isDone(st.id) && st.id !== 'manychat')?.id;
+  const current = open ?? nextStep;
+
+  // While waiting on Meta (webhook verification, the first real event), check back on our own.
+  const waiting = current === 'webhooks' || current === 'publish';
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setInterval(() => void settings.reload(), 5000);
+    return () => clearInterval(t);
+  }, [waiting, settings.reload]);
+
+  function toggleDone(id: string) {
+    const next = done.includes(id) ? done.filter((d) => d !== id) : [...done, id];
+    setDone(next);
+    try {
+      localStorage.setItem(DONE_KEY, JSON.stringify(next));
+    } catch {}
+    setOpen(undefined);
+  }
+
+  const banner = params.get('connected') ? (
+    <p className="border-2 border-success bg-success-soft px-4 py-3 font-bold text-success">
+      Connected @{params.get('connected')}. 🎉
+    </p>
+  ) : params.get('error') ? (
+    <FormError message={params.get('error') ?? undefined} />
+  ) : null;
+
+  return (
+    <Page>
+      <PageHeader title="Channels" />
+      {banner && (
+        <div className="-mt-4 grid gap-2">
+          {banner}
+          <button
+            type="button"
+            className="linkbtn w-fit"
+            onClick={() => setParams({}, { replace: true })}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {s && s.accounts.length > 0 && (
+        <section aria-labelledby="accounts-h" className="grid gap-3">
+          <h2 id="accounts-h" className="font-display text-display-sm font-bold">
+            Instagram
+          </h2>
+          {s.accounts.map((a) => (
+            <div key={a.id} className="card flex flex-wrap items-center gap-4">
+              {a.profilePictureUrl ? (
+                <img
+                  src={a.profilePictureUrl}
+                  alt=""
+                  className="size-12 rounded-full border-2 border-edge object-cover"
+                />
+              ) : (
+                <SquareIcon name="chat" size={40} />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-bold">@{a.username ?? a.igUserId}</p>
+                <p className="text-[13px] text-muted">
+                  {a.accountType === 'MEDIA_CREATOR'
+                    ? 'Creator'
+                    : a.accountType === 'BUSINESS'
+                      ? 'Business'
+                      : 'Professional'}{' '}
+                  account · connected {timeAgo(a.connectedAt)}
+                </p>
+                {a.statusDetail && (
+                  <p className="mt-1 text-[13px] font-bold text-danger">{a.statusDetail}</p>
+                )}
+              </div>
+              <span className={`chip ${a.status === 'connected' ? 'chip-success' : 'chip-danger'}`}>
+                {a.status === 'connected' ? 'Connected' : 'Needs attention'}
+              </span>
+              {a.status !== 'connected' && (
+                <a className="btn btn-sm" href="/api/instagram/connect">
+                  Reconnect
+                </a>
+              )}
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `Disconnect @${a.username}? Flows stop answering on this account until you connect it again. Contacts and history stay.`,
+                    )
+                  )
+                    return;
+                  await api(`/instagram/accounts/${a.id}`, undefined, 'DELETE');
+                  void settings.reload();
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+
+      <section aria-labelledby="wizard-h" className="grid gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 id="wizard-h" className="font-display text-display-md font-bold">
+              {connected.length ? 'Instagram setup' : 'Connect Instagram'}
+            </h2>
+            <p className="mt-1 text-[15px] text-muted">
+              About 20 minutes the first time. Each step checks itself where it can.
+            </p>
+          </div>
+          {guide.data && (
+            <span className="text-[12px] text-muted">
+              {guide.data.source === 'latest'
+                ? 'Guide: latest version'
+                : 'Guide: copy bundled with this version'}
+            </span>
+          )}
+        </div>
+
+        {s && !s.isPublic && (
+          <p className="border-2 border-accent bg-surface px-4 py-3 text-[15px]">
+            <b>This install isn’t on a public https address yet</b> (it’s set to {s.publicUrl}).
+            Meta needs one to reach your webhooks. See “Serving it on a real domain” in the README,
+            then set <code>PUBLIC_URL</code>.
+          </p>
+        )}
+
+        <ol className="grid gap-3">
+          {steps.map((st, i) => {
+            const isOpen = current === st.id;
+            const complete = isDone(st.id);
+            const optional = st.id === 'manychat';
+            return (
+              <li
+                key={st.id}
+                className={`border-2 bg-surface ${isOpen ? 'border-edge shadow-hard' : 'border-line'}`}
+              >
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  onClick={() => setOpen(isOpen ? '' : st.id)}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2"
+                >
+                  {complete ? (
+                    <SquareIcon name="check" size={28} label="Done" />
+                  ) : (
+                    <span className="flex size-7 shrink-0 items-center justify-center border-2 border-edge text-sm font-bold tabular-nums">
+                      {i + 1}
+                    </span>
+                  )}
+                  <span className="flex-1 font-bold">{st.title}</span>
+                  {optional && !complete && <span className="chip">If needed</span>}
+                  {!complete && !optional && st.id === nextStep && (
+                    <span className="chip chip-orange">Next</span>
+                  )}
+                </button>
+                {isOpen && s && (
+                  <div className="grid gap-4 border-t-2 border-line px-4 py-4">
+                    <GuideText markdown={st.body} />
+                    <StepExtras step={st.id} settings={s} onSaved={() => void settings.reload()} />
+                    {proven[st.id] === undefined || !proven[st.id] ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm w-fit"
+                        onClick={() => toggleDone(st.id)}
+                      >
+                        {done.includes(st.id) ? 'Mark as not done' : 'I’ve done this'}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+        {guide.error && <FormError message="Couldn’t load the setup guide." />}
+      </section>
+    </Page>
+  );
+}
+
+/** The live parts of a step: forms, buttons and checks. */
+function StepExtras({
+  step,
+  settings: s,
+  onSaved,
+}: {
+  step: string;
+  settings: InstagramSettings;
+  onSaved: () => void;
+}): ReactNode {
+  const connected = s.accounts.filter((a) => a.status === 'connected');
+  switch (step) {
+    case 'credentials':
+      return <CredentialsForm settings={s} onSaved={onSaved} />;
+    case 'webhooks':
+      return (
+        <Check
+          ok={Boolean(s.webhookVerifiedAt)}
+          okText={`Meta verified your webhook ${timeAgo(s.webhookVerifiedAt)}`}
+          waitText="Waiting for Meta to verify… (checks every few seconds)"
+        />
+      );
+    case 'connect': {
+      const ready = Boolean(s.instagramAppId && s.hasInstagramAppSecret);
+      return (
+        <div className="grid gap-3">
+          {ready ? (
+            <a className="btn btn-primary w-fit" href="/api/instagram/connect">
+              {connected.length ? 'Connect another account' : 'Connect Instagram'}
+            </a>
+          ) : (
+            <p className="text-[14px] text-muted">Save your app ID and secret (step 4) first.</p>
+          )}
+          <Check
+            ok={connected.length > 0}
+            okText={`Connected as ${connected.map((a) => `@${a.username}`).join(', ')}`}
+            waitText="Not connected yet"
+          />
+        </div>
+      );
+    }
+    case 'publish':
+      return (
+        <Check
+          ok={Boolean(
+            s.lastWebhookAt && connected[0] && s.lastWebhookAt > connected[0].connectedAt,
+          )}
+          okText={`A real event from Instagram arrived ${timeAgo(s.lastWebhookAt)}`}
+          waitText="Waiting for a real event (try commenting on one of your posts)"
+        />
+      );
+    default:
+      return null;
+  }
+}
+
+function CredentialsForm({
+  settings: s,
+  onSaved,
+}: {
+  settings: InstagramSettings;
+  onSaved: () => void;
+}) {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function save(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const body: Record<string, string> = {};
+    for (const key of ['instagramAppId', 'instagramAppSecret', 'facebookAppSecret']) {
+      const v = String(form.get(key) ?? '').trim();
+      if (v) body[key] = v;
+    }
+    setBusy(true);
+    setErrors({});
+    try {
+      await api('/instagram/settings', body, 'PUT');
+      e.currentTarget?.reset();
+      setSaved(true);
+      onSaved();
+    } catch (err) {
+      setErrors(
+        err instanceof ApiError
+          ? err.fieldErrors()
+          : { instagramAppId: 'Couldn’t save. Try again.' },
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="grid gap-3 border-2 border-line p-4" autoComplete="off">
+      <Field
+        label="Instagram app ID"
+        name="instagramAppId"
+        inputMode="numeric"
+        placeholder={s.instagramAppId ?? 'e.g. 1234567890123456'}
+        error={errors.instagramAppId}
+      />
+      <Field
+        label="Instagram app secret"
+        name="instagramAppSecret"
+        type="password"
+        placeholder={s.hasInstagramAppSecret ? 'Saved. Paste a new one to replace it.' : ''}
+        error={errors.instagramAppSecret}
+      />
+      <Field
+        label="Facebook app secret"
+        name="facebookAppSecret"
+        type="password"
+        placeholder={s.hasFacebookAppSecret ? 'Saved. Paste a new one to replace it.' : ''}
+        error={errors.facebookAppSecret}
+        hint="App settings → Basic. Used to check that messages really come from Meta."
+      />
+      <div className="flex items-center gap-3">
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+          Save
+        </button>
+        {saved && <span className="text-[13px] font-bold text-success">Saved and encrypted</span>}
+      </div>
+    </form>
+  );
+}

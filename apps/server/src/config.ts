@@ -21,6 +21,11 @@ const envSchema = z.object({
   META_APP_SECRET: z.string().optional(),
   /** Shown on the public privacy page as the way to reach whoever runs this install. */
   PRIVACY_CONTACT: z.string().optional(),
+  /** Fetch the latest setup guides from the project's repo ("off" uses only the bundled copy). */
+  GUIDE_UPDATES: z.enum(['on', 'off']).default('on'),
+  GUIDE_BASE_URL: z
+    .url()
+    .default('https://raw.githubusercontent.com/tghmtn/social-switchboard/main/docs/guides'),
 });
 
 export type Config = ReturnType<typeof loadConfig>;
@@ -55,6 +60,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     version: e.APP_VERSION,
     metaAppSecret: e.META_APP_SECRET || undefined,
     privacyContact: e.PRIVACY_CONTACT || undefined,
+    guideUpdates: e.GUIDE_UPDATES === 'on',
+    guideBaseUrl: e.GUIDE_BASE_URL.replace(/\/$/, ''),
+    guidesDir: resolve(here, '../../../docs/guides'),
     migrationsDir: resolve(here, '../drizzle'),
     webDist: resolve(here, '../../web/dist'),
   };

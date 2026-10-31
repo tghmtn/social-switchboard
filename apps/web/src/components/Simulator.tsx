@@ -37,6 +37,7 @@ function waitText(r: SimRun) {
 export function Simulator({ flowId, showState = true }: { flowId?: string; showState?: boolean }) {
   const { data, setData, reload } = useApi<SimState>('/simulator');
   const [text, setText] = useState('');
+  const [asComment, setAsComment] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const bottom = useRef<HTMLDivElement>(null);
@@ -86,7 +87,7 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
     const t = text.trim();
     if (!t) return;
     setText('');
-    void act('/simulator/send', { text: t });
+    void act(asComment ? '/simulator/comment' : '/simulator/send', { text: t });
   }
 
   return (
@@ -156,15 +157,24 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
         </div>
 
         <form onSubmit={send} className="flex gap-2 border-t-2 border-edge p-2.5">
+          <button
+            type="button"
+            className={`btn btn-sm shrink-0 ${asComment ? 'bg-surface-2 shadow-hard-sm' : ''}`}
+            aria-pressed={asComment}
+            onClick={() => setAsComment((c) => !c)}
+            title="Send as a public comment on a post, to test comment triggers"
+          >
+            {asComment ? '💬 Comment' : 'DM'}
+          </button>
           <label htmlFor="sim-input" className="sr-only">
-            Message
+            {asComment ? 'Comment' : 'Message'}
           </label>
           <input
             id="sim-input"
             className="input"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Type a message…"
+            placeholder={asComment ? 'Comment on a post…' : 'Type a message…'}
             autoComplete="off"
             maxLength={2000}
           />
@@ -251,14 +261,22 @@ function Bubble({
     const c = m.content;
     return (
       <div className="bubble bubble-me">
+        {c.comment && (
+          <span className="mb-1 block text-label uppercase text-muted">Public comment</span>
+        )}
         {c.text ?? (c.ref ? `Opened a link (ref=${c.ref})` : 'Tapped a button')}
       </div>
     );
   }
-  const { message, payloads } = m.content;
+  const { message, payloads, privateReplyTo, publicReplyTo } = m.content;
   return (
     <div className="grid max-w-[85%] gap-2">
-      <div className="bubble bubble-bot max-w-none">
+      <div className={`bubble bubble-bot max-w-none ${publicReplyTo ? 'border-dashed' : ''}`}>
+        {(privateReplyTo || publicReplyTo) && (
+          <span className="mb-1 block text-label uppercase text-muted">
+            {publicReplyTo ? 'Public reply under the comment' : 'Private reply to the comment'}
+          </span>
+        )}
         {message.parts.map((p, i) => {
           const key = `${m.id}-${i}`;
           if (p.type === 'text')

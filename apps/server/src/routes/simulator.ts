@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { RouteDeps, SessionUser } from '../app';
 import { contactIdentities, contacts, flows, flowVersions, messages, runs } from '../db/schema';
 import { findOrCreateContact, loadSnapshot } from '../runtime/contacts';
-import { type Inbound, receive, startFlow, wake } from '../runtime/runtime';
+import { type Inbound, receive, receiveComment, startFlow, wake } from '../runtime/runtime';
 import { notFound, requireWorkspace, who } from './guard';
 
 // The simulator is a real channel ("simulator") with one contact per signed-in user. Everything
@@ -122,6 +122,27 @@ export const simulatorRoutes =
         .object({ payload: z.string().min(1).max(1000), label: z.string().min(1).max(100) })
         .parse(req.body);
       return send(req, { payload, text: label });
+    });
+
+    /** Simulates a public comment, so comment-to-DM flows can be tested without Instagram. */
+    app.post('/simulator/comment', async (req) => {
+      const { user, workspace } = who(req);
+      const body = z
+        .object({
+          text: z.string().trim().min(1).max(2000),
+          mediaId: z.string().max(64).optional(),
+        })
+        .parse(req.body);
+      await receiveComment(runtime, {
+        workspaceId: workspace.id,
+        channel: CHANNEL,
+        externalId: externalIdFor(user),
+        profile: profileFor(user),
+        commentId: `sim_${Date.now().toString(36)}`,
+        mediaId: body.mediaId,
+        text: body.text,
+      });
+      return state(workspace.id, user);
     });
 
     /** Simulates opening an entry link like ig.me/m/you?ref=spring. */

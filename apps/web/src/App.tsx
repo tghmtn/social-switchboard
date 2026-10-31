@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { ApiError, api, type Me } from './api';
+import { Channels } from './pages/Channels';
 import { ContactDetail } from './pages/ContactDetail';
 import { Contacts } from './pages/Contacts';
 import { FlowEditor } from './pages/FlowEditor';
 import { Flows } from './pages/Flows';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
-import { Channels, Inbox } from './pages/Placeholders';
+import { Inbox } from './pages/Placeholders';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { Shell } from './pages/Shell';
