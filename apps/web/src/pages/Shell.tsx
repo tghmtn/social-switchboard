@@ -4,7 +4,9 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, type Me, useApi } from '../api';
 import { AssistantPanel } from '../components/Assistant';
 import { Icon } from '../components/Icon';
+import { InstallSheet } from '../components/InstallSheet';
 import { SquareIcon, type SquareIconName } from '../components/SquareIcons';
+import { markNudged, shouldNudge, useInstallWay } from '../install';
 import { setAppBadge } from '../push';
 import { getTheme, setTheme, type ThemeChoice } from '../theme';
 import { Avatar, Wordmark } from '../ui';
@@ -66,6 +68,17 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   }, [navigate]);
   const [assistant, setAssistant] = useState(false);
   const [more, setMore] = useState(false);
+  // On a phone, once: suggest adding the app to the Home Screen (More → Get the app after that).
+  const installWay = useInstallWay();
+  const [install, setInstall] = useState(false);
+  useEffect(() => {
+    if (!installWay || !shouldNudge()) return;
+    const t = setTimeout(() => {
+      markNudged();
+      setInstall(true);
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [installWay]);
   // A new page closes the More sheet.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs on navigation
   useEffect(() => setMore(false), [location.pathname]);
@@ -180,9 +193,18 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             setAssistant(true);
           }}
           onSignOut={signOut}
+          onInstall={
+            installWay
+              ? () => {
+                  setMore(false);
+                  setInstall(true);
+                }
+              : undefined
+          }
           onClose={() => setMore(false)}
         />
       )}
+      {install && installWay && <InstallSheet way={installWay} onClose={() => setInstall(false)} />}
       {assistant && <AssistantPanel me={me} onClose={() => setAssistant(false)} />}
     </div>
   );
@@ -195,6 +217,7 @@ function MoreSheet({
   onTheme,
   onAssistant,
   onSignOut,
+  onInstall,
   onClose,
 }: {
   me: Me;
@@ -202,6 +225,8 @@ function MoreSheet({
   onTheme: (c: ThemeChoice) => void;
   onAssistant: () => void;
   onSignOut: () => void;
+  /** Set while the app isn't on this phone's Home Screen yet. */
+  onInstall?: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -245,6 +270,17 @@ function MoreSheet({
             <span className="text-[13px] font-normal text-muted">Build flows, check setup</span>
           </span>
         </button>
+        {onInstall && (
+          <button type="button" className="sheet-row" onClick={onInstall}>
+            <img src="/icon-192.png" alt="" className="size-6 border border-edge" />
+            <span className="grid flex-1 text-left leading-tight">
+              <span className="font-bold">Get the app</span>
+              <span className="text-[13px] font-normal text-muted">
+                Add Switchboard to your Home Screen
+              </span>
+            </span>
+          </button>
+        )}
         <div className="mt-2 flex items-center gap-3 border-t-2 border-line px-2 pt-3">
           <Avatar name={me.user.name} />
           <span className="grid min-w-0 flex-1 leading-tight">
