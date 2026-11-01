@@ -179,6 +179,28 @@ export type InstagramAccount = {
   tokenExpiresAt: string | null;
   connectedAt: string;
 };
+export type FacebookSettings = {
+  appId: string | null;
+  appIdSaved: boolean;
+  configId: string | null;
+  hasAppSecret: boolean;
+  urls: { oauthRedirect: string; webhook: string; privacy: string };
+  webhookVerifyToken: string;
+  webhookVerifiedAt: string | null;
+  lastWebhookAt: string | null;
+  scopes: string[];
+  fields: string[];
+  pages: {
+    id: string;
+    pageId: string;
+    name: string | null;
+    pictureUrl: string | null;
+    status: string;
+    statusDetail: string | null;
+    connectedAt: string;
+  }[];
+  pending: { id: string; name: string; picture: string | null; connected: boolean }[];
+};
 export type InstagramSettings = {
   publicUrl: string;
   isPublic: boolean;

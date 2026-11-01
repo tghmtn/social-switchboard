@@ -299,7 +299,7 @@ async function send(deps: Deps, n: Notice) {
     if (ways.includes('sms') && from.twilio && r.phone)
       jobs.push({
         to: 'text',
-        job: sendSms(from.twilio, r.phone, `${title}: ${text}`.slice(0, 280) + `\n${link}`),
+        job: sendSms(from.twilio, r.phone, `${`${title}: ${text}`.slice(0, 280)}\n${link}`),
       });
   }
   const results = await Promise.allSettled(jobs.map((j) => j.job));
@@ -312,7 +312,7 @@ async function send(deps: Deps, n: Notice) {
   });
 }
 
-const escape = (s: string) =>
+const escapeHtml = (s: string) =>
   s.replace(
     /[&<>"]/g,
     (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] ?? ch,
@@ -332,10 +332,10 @@ export function alertEmail(
     subject: title,
     text: `${text}\n\nOpen the conversation: ${link}\n\n—\nSocial Switchboard. Choose what you get in Settings → Notifications: ${settings}`,
     html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5;color:#111">
-<p style="font-size:17px;font-weight:700;margin:0 0 8px">${escape(title)}</p>
-<p style="margin:0 0 16px;white-space:pre-wrap">${escape(text)}</p>
-<p style="margin:0 0 24px"><a href="${escape(link)}" style="display:inline-block;background:#6d4aff;color:#fff;padding:10px 16px;text-decoration:none;font-weight:700">Open the conversation</a></p>
-<p style="margin:0;font-size:12px;color:#666">Social Switchboard · <a href="${escape(settings)}" style="color:#666">Choose what you get</a></p>
+<p style="font-size:17px;font-weight:700;margin:0 0 8px">${escapeHtml(title)}</p>
+<p style="margin:0 0 16px;white-space:pre-wrap">${escapeHtml(text)}</p>
+<p style="margin:0 0 24px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#6d4aff;color:#fff;padding:10px 16px;text-decoration:none;font-weight:700">Open the conversation</a></p>
+<p style="margin:0;font-size:12px;color:#666">Social Switchboard · <a href="${escapeHtml(settings)}" style="color:#666">Choose what you get</a></p>
 </div>`,
   };
 }

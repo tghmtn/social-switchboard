@@ -9,7 +9,14 @@ import {
 import { type FormEvent, Fragment, type ReactNode, useEffect, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Link, useSearchParams } from 'react-router';
-import { ApiError, api, type Guide, type InstagramSettings, useApi } from '../api';
+import {
+  ApiError,
+  api,
+  type FacebookSettings,
+  type Guide,
+  type InstagramSettings,
+  useApi,
+} from '../api';
 import { Icon } from '../components/Icon';
 import { SquareIcon } from '../components/SquareIcons';
 import { Avatar, Field, FormError, PageHeader, SecretField, timeAgo } from '../ui';
@@ -20,11 +27,6 @@ import { Page } from './Shell';
 // project's repo when possible); the checks, forms and buttons are built in.
 
 const LATER: { name: string; icon: PhosphorIcon; detail: string }[] = [
-  {
-    name: 'Facebook',
-    icon: FacebookLogo,
-    detail: 'Messenger and Page comments, on the same Meta app.',
-  },
   { name: 'TikTok', icon: TiktokLogo, detail: 'Comment and DM automation for business accounts.' },
   { name: 'YouTube', icon: YoutubeLogo, detail: 'Replies to comments on your videos.' },
   { name: 'LinkedIn', icon: LinkedinLogo, detail: 'Page comments and messages.' },
@@ -32,6 +34,8 @@ const LATER: { name: string; icon: PhosphorIcon; detail: string }[] = [
 
 export function Channels() {
   const { data: s } = useApi<InstagramSettings>('/instagram/settings');
+  const { data: fb } = useApi<FacebookSettings>('/facebook/settings');
+  const pages = fb?.pages.filter((p) => p.status === 'connected') ?? [];
   const connected = s?.accounts.filter((a) => a.status === 'connected') ?? [];
   const attention = s?.accounts.some((a) => a.status !== 'connected' || a.statusDetail);
   return (
@@ -56,6 +60,28 @@ export function Channels() {
                   : 'Not set up'}
             </span>
             {attention && <span className="chip chip-danger">Needs attention</span>}
+          </span>
+        </Link>
+        <Link
+          to="/channels/facebook"
+          className="card press grid content-start gap-3 text-ink no-underline"
+        >
+          <span className="flex items-center gap-3">
+            <Icon icon={FacebookLogo} size={40} />
+            <span className="text-lg font-bold">Facebook</span>
+          </span>
+          <span className="text-[14px] text-muted">
+            Messenger and comments on your Page’s posts, on the same Meta app.
+          </span>
+          <span className="flex flex-wrap gap-2">
+            <span className={`chip ${pages.length ? 'chip-success' : 'chip-orange'}`}>
+              {pages.length
+                ? `Connected: ${pages.map((p) => p.name ?? p.pageId).join(', ')}`
+                : 'Not set up'}
+            </span>
+            {fb?.pages.some((p) => p.status !== 'connected') && (
+              <span className="chip chip-danger">Needs attention</span>
+            )}
           </span>
         </Link>
         {LATER.map((c) => (
@@ -100,7 +126,7 @@ function loadDone(): string[] {
 }
 
 /** Inline value with a copy button; falls back to selecting the text where the clipboard is blocked (plain http). */
-function CopyText({ text }: { text: string }) {
+export function CopyText({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <span className="inline-flex max-w-full items-stretch border-2 border-edge bg-surface-2 align-middle">

@@ -556,6 +556,9 @@ export async function deliver(deps: RuntimeDeps, ids: string[]) {
       .where(
         and(eq(contactIdentities.contactId, m.contactId), eq(contactIdentities.channel, m.channel)),
       )
+      // The newest id wins: on Facebook a commenter's Messenger id is linked after their comment
+      // id, and only the Messenger id can be messaged.
+      .orderBy(desc(contactIdentities.createdAt))
       .limit(1);
     const adapter = deps.channels.get(m.channel);
     let result: SendResult;

@@ -15,6 +15,7 @@ import { notifier } from './notify';
 import { assistantRoutes } from './routes/assistant';
 import { authRoutes } from './routes/auth';
 import { contactRoutes } from './routes/contacts';
+import { facebookPublicRoutes, facebookRoutes } from './routes/facebook';
 import { flowRoutes } from './routes/flows';
 import { healthRoutes } from './routes/health';
 import { inboxRoutes } from './routes/inbox';
@@ -131,6 +132,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
   await app.register(authRoutes(deps), { prefix: '/api' });
   await app.register(legalRoutes(routeDeps));
   await app.register(instagramPublicRoutes(routeDeps), { prefix: '/api' });
+  await app.register(facebookPublicRoutes(routeDeps), { prefix: '/api' });
   for (const routes of [
     contactRoutes,
     libraryRoutes,
@@ -138,6 +140,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     simulatorRoutes,
     overviewRoutes,
     instagramRoutes,
+    facebookRoutes,
     inboxRoutes,
     workspaceRoutes,
     assistantRoutes,

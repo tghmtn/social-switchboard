@@ -71,6 +71,7 @@ const PAGE_NAMES: [RegExp, string][] = [
   [/^\/inbox\/./, 'the conversation'],
   [/^\/inbox$/, 'the Inbox'],
   [/^\/channels\/instagram$/, 'Instagram setup'],
+  [/^\/channels\/facebook$/, 'Facebook setup'],
   [/^\/channels$/, 'Channels'],
   [/^\/simulator$/, 'the Simulator'],
   [/^\/settings$/, 'Settings'],

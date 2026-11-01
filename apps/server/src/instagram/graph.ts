@@ -7,7 +7,7 @@
 
 /** Which API an account's token works with. */
 export type Host = 'instagram' | 'facebook';
-const VERSIONS: Record<Host, string> = {
+export const VERSIONS: Record<Host, string> = {
   instagram: process.env.META_INSTAGRAM_API_VERSION ?? 'v25.0',
   facebook: process.env.META_GRAPH_API_VERSION ?? 'v26.0',
 };
@@ -88,6 +88,11 @@ async function call<T>(res: Response): Promise<T> {
     );
   }
   return data as T;
+}
+
+/** A Graph API request, with Meta's errors as MetaError (shared with the Facebook channel). */
+export async function graphRequest<T>(url: string | URL, init?: RequestInit) {
+  return call<T>(await http(url, init));
 }
 
 const bearer = (token: string) => ({

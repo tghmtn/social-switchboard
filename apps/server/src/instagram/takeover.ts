@@ -50,13 +50,21 @@ export async function tooSoonToTell(db: Db, receivedAt: Date, echoIds: string[])
 /** A person replied from the Instagram app: keep their message and pause automation. */
 export async function personReplied(
   db: Db,
-  input: { workspaceId: string; accountRef: string; igsid: string; mid?: string; text?: string },
+  input: {
+    workspaceId: string;
+    accountRef: string;
+    igsid: string;
+    mid?: string;
+    text?: string;
+    /** instagram (default) or facebook: the same echo rules apply to Messenger. */
+    channel?: string;
+  },
 ) {
   await db.transaction(async (tx) => {
     const { contactId } = await findOrCreateContact(
       tx,
       input.workspaceId,
-      'instagram',
+      input.channel ?? 'instagram',
       input.igsid,
       {
         accountRef: input.accountRef,
@@ -68,7 +76,7 @@ export async function personReplied(
     await tx.insert(messages).values({
       workspaceId: input.workspaceId,
       contactId,
-      channel: 'instagram',
+      channel: input.channel ?? 'instagram',
       direction: 'out',
       status: 'sent',
       sentAt: now,

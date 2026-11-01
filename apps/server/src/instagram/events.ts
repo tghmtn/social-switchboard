@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { instagramAccounts, webhookEvents } from '../db/schema';
+import { handlePage, type PagePayload } from '../facebook/events';
 import { type RuntimeDeps, receive, receiveComment } from '../runtime/runtime';
 import { newContactProfile, saveAvatar, saveProfile, staleProfile } from './profiles';
 import { decryptOptional } from './settings';
@@ -95,6 +96,8 @@ export async function processWebhookEvents(
 }
 
 async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string }, payload: Payload) {
+  // Facebook Pages share this pipeline (same Meta app, webhooks and signatures).
+  if (payload.object === 'page') return handlePage(deps, payload as PagePayload);
   if (payload.object !== 'instagram') return;
   for (const entry of payload.entry ?? []) {
     if (!entry.id) continue;

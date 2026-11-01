@@ -541,8 +541,38 @@ export const metaApps = pgTable('meta_apps', {
   webhookVerifiedAt: timestamp('webhook_verified_at', { withTimezone: true }),
   /** Last signed event from Meta; proves webhooks really arrive (i.e. the app is published). */
   lastWebhookAt: timestamp('last_webhook_at', { withTimezone: true }),
+  /**
+   * Facebook Pages: the Meta app ID for Facebook Login (else the Login URL's client_id), and a
+   * Facebook Login for Business configuration ID when the app uses one instead of permissions.
+   */
+  facebookAppId: text('facebook_app_id'),
+  facebookConfigId: text('facebook_config_id'),
+  /** Pages the last Facebook login could connect, until the owner picks which. Encrypted. */
+  facebookPendingEnc: text('facebook_pending_enc'),
+  facebookPendingAt: timestamp('facebook_pending_at', { withTimezone: true }),
   updatedAt: updatedAt(),
 });
+
+/** Facebook Pages connected for Messenger and comments. */
+export const facebookPages = pgTable(
+  'facebook_pages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: workspaceId(),
+    /** The Page id Meta uses in webhooks (entry.id) and for sending. */
+    pageId: text('page_id').notNull().unique(),
+    name: text('name'),
+    pictureUrl: text('picture_url'),
+    /** A Page token from a long-lived user token: it doesn't expire. */
+    accessTokenEnc: text('access_token_enc').notNull(),
+    /** connected, or error (statusDetail says why). */
+    status: text('status').notNull().default('connected'),
+    statusDetail: text('status_detail'),
+    connectedAt: timestamp('connected_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('facebook_pages_workspace_idx').on(t.workspaceId)],
+);
 
 export const instagramAccounts = pgTable(
   'instagram_accounts',

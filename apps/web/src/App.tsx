@@ -5,6 +5,7 @@ import { AcceptInvite } from './pages/AcceptInvite';
 import { Channels, InstagramChannel } from './pages/Channels';
 import { ContactDetail } from './pages/ContactDetail';
 import { Contacts } from './pages/Contacts';
+import { FacebookChannel } from './pages/FacebookChannel';
 import { FlowEditor } from './pages/FlowEditor';
 import { Flows } from './pages/Flows';
 import { Home } from './pages/Home';
@@ -80,6 +81,7 @@ export function App() {
               <Route path="/simulator" element={<SimulatorPage />} />
               <Route path="/channels" element={<Channels />} />
               <Route path="/channels/instagram" element={<InstagramChannel />} />
+              <Route path="/channels/facebook" element={<FacebookChannel />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/inbox/:id" element={<Inbox />} />
               <Route path="/settings" element={<Settings me={state.me} />} />
