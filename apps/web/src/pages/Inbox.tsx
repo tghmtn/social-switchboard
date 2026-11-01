@@ -2,6 +2,7 @@ import { InstagramLogo } from '@phosphor-icons/react';
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
+  ApiError,
   api,
   avatarUrl,
   type InboxDetail,
@@ -390,6 +391,7 @@ function Composer({
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [suggesting, setSuggesting] = useState(false);
   const open = windowEndsAt !== null && new Date(windowEndsAt).getTime() > Date.now();
   const canSend = mode === 'note' || open;
 
@@ -458,6 +460,32 @@ function Composer({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
         />
+        {mode === 'reply' && canSend && (
+          <button
+            type="button"
+            className="btn"
+            disabled={suggesting}
+            title="Draft a reply with AI. You can edit it before sending."
+            onClick={async () => {
+              setSuggesting(true);
+              setError(undefined);
+              try {
+                const r = await api<{ text: string }>(`/inbox/${id}/suggest`, {});
+                setText(r.text);
+              } catch (err) {
+                setError(
+                  err instanceof ApiError && err.code.includes(' ')
+                    ? err.code
+                    : 'Couldn’t get a suggestion.',
+                );
+              } finally {
+                setSuggesting(false);
+              }
+            }}
+          >
+            {suggesting ? '…' : '✨ Suggest'}
+          </button>
+        )}
         <button
           type="submit"
           className="btn btn-primary"

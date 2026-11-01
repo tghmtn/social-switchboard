@@ -1,11 +1,14 @@
 import { eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { layOut, setAssistantClient } from './ai/assistant';
+import { layOut } from './ai/assistant';
+import { setAiClient } from './ai/client';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createDb, runMigrations } from './db/client';
 import { aiActions, aiUsage, flows } from './db/schema';
+import { defaultChannels } from './runtime/channels';
+import { receive } from './runtime/runtime';
 
 // The in-app assistant against a scripted Claude: reading runs on its own, changes wait for a yes,
 // and the conversation goes back to the API exactly as it came out.
@@ -66,7 +69,7 @@ describe.skipIf(!databaseUrl)('assistant', () => {
   beforeAll(async () => {
     await runMigrations(db, config.migrationsDir);
     app = await buildApp({ db, config }, false);
-    setAssistantClient((apiKey) => {
+    setAiClient((apiKey) => {
       keys.push(apiKey);
       return {
         beta: {
@@ -277,6 +280,27 @@ describe.skipIf(!databaseUrl)('assistant', () => {
     // Haiku gets no server-side fallback.
     expect(requests[0]).not.toHaveProperty('fallbacks');
     expect(requests[0]).toMatchObject({ model: 'claude-haiku-5-5' });
+  });
+
+  it('drafts an inbox reply from the conversation', async () => {
+    await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+    const [ws] = (await db.execute<{ id: string }>(sql`select id from workspaces limit 1`)).rows;
+    const { contactId } = await receive(
+      { db, channels: defaultChannels() },
+      {
+        workspaceId: ws?.id ?? '',
+        channel: 'instagram',
+        externalId: 'ig-fan',
+        profile: { username: 'fan', firstName: 'Fan' },
+        text: 'How much is the workshop?',
+      },
+    );
+    script = [reply([{ type: 'text', text: 'It’s [price] and includes the worksheet!' }])];
+    const res = await call<{ text: string }>('POST', `/api/inbox/${contactId}/suggest`);
+    expect(res.body).toEqual({ text: 'It’s [price] and includes the worksheet!' });
+    expect(requests[0]).toMatchObject({ output_config: { effort: 'low' } });
+    const prompt = JSON.stringify((requests[0] as { messages: unknown }).messages);
+    expect(prompt).toContain('Fan: How much is the workshop?');
   });
 
   it('needs a key before it can start', async () => {

@@ -1,16 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { decryptSecret } from '../crypto';
 import type { Db } from '../db/client';
-import {
-  type AssistantPending,
-  aiActions,
-  aiUsage,
-  assistantThreads,
-  workspaces,
-} from '../db/schema';
-import { DEFAULT_EFFORT, EFFORTS, type Effort, modelFor } from './models';
+import { type AssistantPending, aiActions, assistantThreads } from '../db/schema';
+import { aiClient, aiErrorText, recordUsage, workspaceAi } from './client';
 import { SYSTEM_PROMPT } from './prompt';
 
 // The in-app assistant: a Claude tool loop over the app's own API. Reading tools run right away;
@@ -35,13 +28,6 @@ export type AssistantDeps = {
   userId: string;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
 };
-
-type Client = Pick<Anthropic, 'beta'>;
-let makeClient = (apiKey: string): Client => new Anthropic({ apiKey, timeout: 180_000 });
-/** Swappable for tests. */
-export function setAssistantClient(factory: (apiKey: string) => Client) {
-  makeClient = factory;
-}
 
 const MAX_STEPS = 12;
 const anyObject = { type: 'object' as const, properties: {} };
@@ -563,21 +549,6 @@ async function runTool(
 
 // ---------------------------------------------------------------- the loop
 
-async function settings(db: Db, appSecret: string, workspaceId: string) {
-  const [ws] = await db
-    .select({ model: workspaces.aiModel, effort: workspaces.aiEffort, keyEnc: workspaces.aiKeyEnc })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId));
-  if (!ws?.keyEnc) return undefined;
-  return {
-    apiKey: decryptSecret(appSecret, ws.keyEnc),
-    model: modelFor(ws.model),
-    effort: (EFFORTS as readonly string[]).includes(ws.effort ?? '')
-      ? (ws.effort as Effort)
-      : DEFAULT_EFFORT,
-  };
-}
-
 async function save(
   db: Db,
   threadId: string,
@@ -609,21 +580,6 @@ async function log(
   });
 }
 
-/** Plain words for an API failure, shown in the assistant panel. */
-function friendly(err: unknown) {
-  if (err instanceof Anthropic.AuthenticationError)
-    return 'The Anthropic API key was refused. Check it in Settings → AI.';
-  if (err instanceof Anthropic.PermissionDeniedError)
-    return 'That Anthropic key can’t use this model. Pick another model in Settings → AI.';
-  if (err instanceof Anthropic.RateLimitError)
-    return 'Anthropic says you’ve hit a rate limit. Wait a minute and try again.';
-  if (err instanceof Anthropic.BadRequestError)
-    return `Anthropic refused the request: ${err.message}`;
-  if (err instanceof Anthropic.APIError)
-    return `Anthropic had a problem (${err.status ?? 'no answer'}). Try again in a moment.`;
-  return 'Something went wrong talking to the AI. Try again in a moment.';
-}
-
 /**
  * Runs the conversation forward from where it is: calls Claude, runs reading tools, and stops
  * when Claude is done or proposes a change (status "waiting").
@@ -634,7 +590,7 @@ export async function advance(deps: AssistantDeps, threadId: string) {
     .from(assistantThreads)
     .where(eq(assistantThreads.id, threadId));
   if (!thread) return;
-  const s = await settings(deps.db, deps.appSecret, deps.workspaceId);
+  const s = await workspaceAi(deps.db, deps.appSecret, deps.workspaceId);
   if (!s) {
     await save(deps.db, threadId, {
       status: 'error',
@@ -642,7 +598,7 @@ export async function advance(deps: AssistantDeps, threadId: string) {
     });
     return;
   }
-  const client = makeClient(s.apiKey);
+  const client = aiClient(s.apiKey);
   const messages = thread.messages as Message[];
 
   try {
@@ -661,16 +617,11 @@ export async function advance(deps: AssistantDeps, threadId: string) {
           ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
           : {}),
       });
-      await deps.db.insert(aiUsage).values({
-        workspaceId: deps.workspaceId,
-        userId: deps.userId,
-        threadId,
-        model: response.model,
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-        cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
-        cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
-      });
+      await recordUsage(
+        deps.db,
+        { workspaceId: deps.workspaceId, userId: deps.userId, threadId },
+        response,
+      );
       // The whole content goes back as-is (thinking and fallback blocks included).
       messages.push({ role: 'assistant', content: response.content });
       await save(deps.db, threadId, { messages });
@@ -734,7 +685,7 @@ export async function advance(deps: AssistantDeps, threadId: string) {
     await save(deps.db, threadId, { messages, status: 'idle', error: null });
   } catch (err) {
     deps.log?.('assistant failed', { error: err instanceof Error ? err.message : String(err) });
-    await save(deps.db, threadId, { messages, status: 'error', error: friendly(err) });
+    await save(deps.db, threadId, { messages, status: 'error', error: aiErrorText(err) });
   }
 }
 

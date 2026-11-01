@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { aiClient, aiErrorText, recordUsage, workspaceAi } from '../ai/client';
 import type { RouteDeps } from '../app';
 import type { Tx } from '../db/client';
 import {
@@ -11,6 +12,7 @@ import {
   messages,
   users,
   workspaceMembers,
+  workspaces,
 } from '../db/schema';
 import { lockContact, pauseForPerson, recordEvent } from '../runtime/contacts';
 import { deliver } from '../runtime/runtime';
@@ -67,8 +69,10 @@ function preview(content: unknown): string {
   return c.publicReplyTo ? `Replied under the comment: ${shown}` : shown;
 }
 
+const SUGGEST_SYSTEM = `You draft replies to Instagram DMs for a small business or creator. Write the next message the business should send: plain text, usually one to three short sentences, warm and natural, in the same language and tone as the conversation. Answer what they last asked. Don't promise anything the conversation and notes don't support; where you'd need a detail you don't have (a price, a date, a link), put a placeholder in [square brackets] for the person to fill in. Skip greetings in the middle of a conversation. Reply with only the message.`;
+
 export const inboxRoutes =
-  ({ db, runtime }: RouteDeps): FastifyPluginAsync =>
+  ({ db, runtime, config }: RouteDeps): FastifyPluginAsync =>
   async (app) => {
     app.addHook('preHandler', requireWorkspace);
 
@@ -406,6 +410,82 @@ export const inboxRoutes =
         });
       });
       return { ok: true };
+    });
+
+    /**
+     * Drafts the next reply with the workspace's AI, from the conversation and the team's notes.
+     * Only a draft: it fills the reply box, and a person edits and sends it.
+     */
+    app.post('/inbox/:id/suggest', async (req, reply) => {
+      const { user, workspace } = who(req);
+      const { id } = z.object({ id: z.uuid() }).parse(req.params);
+      const c = await contactIn(workspace.id, id);
+      const ai = await workspaceAi(db, config.appSecret, workspace.id);
+      if (!ai)
+        return reply.code(409).send({ error: 'Add an Anthropic API key in Settings → AI first.' });
+      const [ws] = await db
+        .select({ name: workspaces.name })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspace.id));
+      const [rows, notes] = await Promise.all([
+        db
+          .select()
+          .from(messages)
+          .where(and(eq(messages.contactId, id), ne(messages.channel, 'simulator')))
+          .orderBy(desc(messages.seq))
+          .limit(30),
+        db
+          .select({ data: contactEvents.data })
+          .from(contactEvents)
+          .where(and(eq(contactEvents.contactId, id), eq(contactEvents.type, 'note')))
+          .orderBy(desc(contactEvents.createdAt))
+          .limit(10),
+      ]);
+      if (rows.length === 0)
+        return reply.code(409).send({ error: 'There’s nothing to reply to yet.' });
+      const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'them';
+      const transcript = rows
+        .reverse()
+        .map((m) => {
+          const who =
+            m.direction === 'in'
+              ? name
+              : (m.content as { byPerson?: boolean }).byPerson
+                ? 'Us'
+                : 'Us (automated)';
+          return `${who}: ${preview(m.content)}${m.status === 'failed' || m.status === 'blocked' ? ' [not delivered]' : ''}`;
+        })
+        .join('\n');
+      const noteText = notes
+        .map((n) => `- ${String((n.data as { text?: string }).text ?? '')}`)
+        .join('\n');
+      try {
+        const response = await aiClient(ai.apiKey).beta.messages.create({
+          model: ai.model.id,
+          max_tokens: 4000,
+          system: SUGGEST_SYSTEM,
+          output_config: { effort: 'low' },
+          ...(ai.model.fallbacks
+            ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
+            : {}),
+          messages: [
+            {
+              role: 'user',
+              content: `The business: ${ws?.name ?? 'this account'}.\n${noteText ? `Team notes about this person:\n${noteText}\n` : ''}\nThe conversation so far, oldest first:\n${transcript}\n\nDraft our next message to ${name}.`,
+            },
+          ],
+        });
+        await recordUsage(db, { workspaceId: workspace.id, userId: user.id }, response);
+        const text = response.content
+          .flatMap((b) => (b.type === 'text' ? [b.text] : []))
+          .join('')
+          .trim();
+        if (response.stop_reason === 'refusal' || !text)
+          return reply.code(502).send({ error: 'The AI didn’t suggest anything this time.' });
+        return { text };
+      } catch (err) {
+        return reply.code(502).send({ error: aiErrorText(err) });
+      }
     });
 
     /** An internal note on the conversation: teammates see it, the contact never does. */
