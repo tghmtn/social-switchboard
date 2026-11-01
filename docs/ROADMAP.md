@@ -238,6 +238,11 @@ Each phase ends with something you can actually use.
 
 ### Phase 4: AI conversations
 
+> **Status (2026-11-01): AI keys and the in-app assistant built; the AI step and intent router next.**
+> - **Settings → AI:** an Anthropic API key (encrypted, bring your own; Anthropic bills it directly), the model (Claude Opus 5.5 by default, Sonnet 5.5, Haiku 5.5), effort (low, medium, high), a key test, this month's usage with an estimate from list prices, and a log of what the assistant did.
+> - **The assistant (✨ in the menu):** a panel beside any page. Claude works through the app's own API as the signed-in person (their role's permissions apply), with reading tools it uses freely (setup overview, flows, posts, contacts, a contact's history, the setup guide, file-link checks) and changing tools that wait for an Approve: create or change a flow (shown step by step), add a trigger, turn one on or off, publish. Turns run in the background (the panel checks back), the conversation is append-only as the API requires, the system prompt and tools are cached, and refusals fall back server-side.
+> - **Not yet:** OpenAI and local models (the settings and usage tables are ready for another provider), the AI step in flows, the intent router, and suggested replies in the inbox.
+
 - **AI keys in Settings** (Claude, OpenAI, or a local model), stored encrypted like the Meta secrets. Everything below uses them; nothing needs them.
 - **An in-app assistant that can act, not just chat (requested 2026-10-31).** It works through the app's own API as tools, the way an MCP server would, but inside the interface: "build a flow that sends my sling inspection PDF to anyone who comments SLING", "why didn't @ogharring get a reply?", "walk me through the webhooks step". It drafts flows and triggers on the canvas, reads contacts and logs to answer questions, and helps with channel setup. Every change it proposes is shown and confirmed before it's saved.
 

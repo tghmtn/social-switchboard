@@ -2,6 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { ApiError, api, type FieldDef, type Me, type Tag, useApi } from '../api';
 import { getTheme, setTheme, type ThemeChoice } from '../theme';
 import { Field, FormError, PageHeader, Select } from '../ui';
+import { AiSection } from './AiSettings';
 import { Page } from './Shell';
 import { NotificationsSection, TeamSection } from './TeamSettings';
 
@@ -99,6 +100,7 @@ export function Settings({ me }: { me: Me }) {
 
       <TeamSection me={me} />
       <NotificationsSection me={me} />
+      <AiSection me={me} />
 
       <section aria-labelledby="fields-h" className="grid gap-4">
         <div>

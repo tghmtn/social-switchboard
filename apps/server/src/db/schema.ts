@@ -40,6 +40,10 @@ export const workspaces = pgTable('workspaces', {
   /** Push notifications: an ntfy topic URL (ntfy.sh or self-hosted), and its token if it has one. */
   notifyUrl: text('notify_url'),
   notifyTokenEnc: text('notify_token_enc'),
+  /** AI, bring your own key: the Claude model, how much effort it spends, and the key (encrypted). */
+  aiModel: text('ai_model'),
+  aiEffort: text('ai_effort'),
+  aiKeyEnc: text('ai_key_enc'),
   createdAt: createdAt(),
 });
 
@@ -517,6 +521,74 @@ export const instagramAccounts = pgTable(
  * Ids of the messages we sent. Instagram echoes every message the account sends without saying
  * which app sent it, so an echo whose id isn't here was typed by a person. Kept a couple of days.
  */
+/** What the assistant is waiting on: tool calls that change things, plus results of those already run. */
+export type AssistantPending = {
+  calls: { id: string; name: string; input: unknown }[];
+  results: { tool_use_id: string; content: string; is_error?: boolean }[];
+};
+
+/** The in-app assistant's conversations, one teammate each. */
+export const assistantThreads = pgTable(
+  'assistant_threads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: workspaceId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull().default(''),
+    /**
+     * The conversation exactly as the Claude API saw it. Only ever appended to: earlier turns
+     * (thinking blocks included) must go back unchanged.
+     */
+    messages: jsonb('messages').$type<unknown[]>().notNull().default([]),
+    pending: jsonb('pending').$type<AssistantPending | null>(),
+    /** idle, working (a turn is running), waiting (for approval) or error. */
+    status: text('status').notNull().default('idle'),
+    error: text('error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('assistant_threads_user_idx').on(t.userId, t.updatedAt)],
+);
+
+/** Tokens per AI request, for the usage meter. */
+export const aiUsage = pgTable(
+  'ai_usage',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    workspaceId: workspaceId(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    threadId: uuid('thread_id').references(() => assistantThreads.id, { onDelete: 'set null' }),
+    model: text('model').notNull(),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+    cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index('ai_usage_workspace_idx').on(t.workspaceId, t.createdAt)],
+);
+
+/** Everything the assistant did or proposed, and what the person decided: the review log. */
+export const aiActions = pgTable(
+  'ai_actions',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    workspaceId: workspaceId(),
+    threadId: uuid('thread_id').references(() => assistantThreads.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    tool: text('tool').notNull(),
+    input: jsonb('input').$type<unknown>(),
+    /** auto (reading), approved, declined. */
+    decision: text('decision').notNull(),
+    ok: boolean('ok').notNull(),
+    summary: text('summary').notNull().default(''),
+    createdAt: createdAt(),
+  },
+  (t) => [index('ai_actions_workspace_idx').on(t.workspaceId, t.createdAt)],
+);
+
 /** Inbox: how far each teammate has read each conversation (by message seq). */
 export const conversationReads = pgTable(
   'conversation_reads',

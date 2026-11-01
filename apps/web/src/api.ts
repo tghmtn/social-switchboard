@@ -281,6 +281,47 @@ export type InboxDetail = {
   notes: { id: number; text: string; by: string; at: string }[];
   team: { id: string; name: string }[];
 };
+export type AiSettings = {
+  model: string;
+  effort: string;
+  hasKey: boolean;
+  models: { id: string; label: string; note: string; input: number; output: number }[];
+  efforts: string[];
+};
+export type AiUsage = {
+  since: string;
+  models: {
+    model: string;
+    label: string;
+    requests: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    estimatedCost: number;
+  }[];
+  actions: { tool: string; decision: string; ok: boolean; summary: string; at: string }[];
+};
+export type AssistantItem =
+  | { type: 'user'; text: string }
+  | { type: 'assistant'; text: string }
+  | {
+      type: 'tool';
+      id: string;
+      label: string;
+      state: 'running' | 'done' | 'failed' | 'declined' | 'waiting';
+      changes: boolean;
+      detail: string[];
+      error?: string;
+    };
+export type AssistantThread = {
+  id: string;
+  title: string;
+  /** idle, working, waiting (for approval) or error. */
+  status: string;
+  error: string | null;
+  items: AssistantItem[];
+};
 export type Guide = { markdown: string; source: 'latest' | 'bundled' };
 export type FieldDef = { id: string; key: string; label: string; type: string; options: string[] };
 export type Tag = { id: string; name: string; contacts: number };

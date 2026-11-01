@@ -11,6 +11,7 @@ import type { Config } from './config';
 import type { Db } from './db/client';
 import { workspaceMembers, workspaces } from './db/schema';
 import { notifier } from './notify';
+import { assistantRoutes } from './routes/assistant';
 import { authRoutes } from './routes/auth';
 import { contactRoutes } from './routes/contacts';
 import { flowRoutes } from './routes/flows';
@@ -128,6 +129,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     instagramRoutes,
     inboxRoutes,
     workspaceRoutes,
+    assistantRoutes,
   ]) {
     await app.register(routes(routeDeps), { prefix: '/api' });
   }

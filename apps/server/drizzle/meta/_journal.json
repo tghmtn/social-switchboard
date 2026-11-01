@@ -99,6 +99,13 @@
       "when": 1793505740393,
       "tag": "0013_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793507104421,
+      "tag": "0014_ai_assistant",
+      "breakpoints": true
     }
   ]
 }

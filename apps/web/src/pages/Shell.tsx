@@ -2,6 +2,7 @@ import { Moon, Sun } from '@phosphor-icons/react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router';
 import { api, type Me, useApi } from '../api';
+import { AssistantPanel } from '../components/Assistant';
 import { Icon } from '../components/Icon';
 import { SquareIcon, type SquareIconName } from '../components/SquareIcons';
 import { getTheme, setTheme, type ThemeChoice } from '../theme';
@@ -30,6 +31,17 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     return () => clearInterval(t);
   }, [inbox.reload]);
   const themeToggle = <ThemeToggle choice={theme} onChange={setChoice} />;
+  const [assistant, setAssistant] = useState(false);
+  const assistantButton = (wide: boolean) => (
+    <button
+      type="button"
+      onClick={() => setAssistant(true)}
+      aria-expanded={assistant}
+      className={wide ? 'navlink w-full text-left' : 'linkbtn'}
+    >
+      ✨{wide ? ' Assistant' : <span className="sr-only">Assistant</span>}
+    </button>
+  );
 
   async function signOut() {
     await api('/auth/logout', {});
@@ -42,6 +54,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <div className="flex items-center justify-between gap-3 pl-1">
           <Wordmark className="text-[19px]" />
           <div className="flex items-center gap-4 min-[900px]:hidden">
+            {assistantButton(false)}
             {themeToggle}
             <button type="button" onClick={signOut} className="linkbtn">
               Sign out
@@ -66,6 +79,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               )}
             </NavLink>
           ))}
+          <span className="hidden min-[900px]:block">{assistantButton(true)}</span>
         </nav>
         <div className="hidden items-center gap-3 min-[900px]:flex">
           <Avatar name={me.user.name} />
@@ -82,6 +96,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
       <main className="min-w-0">
         <Outlet />
       </main>
+      {assistant && <AssistantPanel me={me} onClose={() => setAssistant(false)} />}
     </div>
   );
 }
