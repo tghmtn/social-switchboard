@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { ApiError, api, type Me } from './api';
+import { AcceptInvite } from './pages/AcceptInvite';
 import { Channels, InstagramChannel } from './pages/Channels';
 import { ContactDetail } from './pages/ContactDetail';
 import { Contacts } from './pages/Contacts';
@@ -42,6 +43,11 @@ export function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A team invite link works signed in or out, so it comes before the usual screens.
+  const invite = window.location.pathname.match(/^\/invite\/([\w-]+)$/)?.[1];
+  if (invite && state.kind !== 'loading' && state.kind !== 'offline')
+    return <AcceptInvite token={invite} onDone={load} />;
 
   switch (state.kind) {
     case 'loading':

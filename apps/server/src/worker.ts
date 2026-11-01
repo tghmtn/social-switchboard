@@ -6,12 +6,18 @@ import { processWebhookEvents } from './instagram/events';
 import { forgetSentIds, resumeDue } from './instagram/takeover';
 import { refreshExpiringTokens } from './instagram/tokens';
 import { log, logError } from './log';
+import { notifier } from './notify';
 import { allChannels } from './runtime/registry';
 import { deliverStale, type RuntimeDeps, wakeDue } from './runtime/runtime';
 
 const config = loadConfig();
 const { db, pool } = createDb(config.databaseUrl);
-const runtime: RuntimeDeps = { db, channels: allChannels(db, config.appSecret), log };
+const runtime: RuntimeDeps = {
+  db,
+  channels: allChannels(db, config.appSecret),
+  log,
+  notify: notifier({ db, appSecret: config.appSecret, publicUrl: config.publicUrl, log }),
+};
 
 const boss = new PgBoss(config.databaseUrl);
 boss.on('error', (err) => logError('pg-boss error', err));

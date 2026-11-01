@@ -3,6 +3,7 @@ import { ApiError, api, type FieldDef, type Me, type Tag, useApi } from '../api'
 import { getTheme, setTheme, type ThemeChoice } from '../theme';
 import { Field, FormError, PageHeader, Select } from '../ui';
 import { Page } from './Shell';
+import { NotificationsSection, TeamSection } from './TeamSettings';
 
 const THEMES: { value: ThemeChoice; label: string }[] = [
   { value: 'system', label: 'Match my device' },
@@ -95,6 +96,9 @@ export function Settings({ me }: { me: Me }) {
           ))}
         </dl>
       </section>
+
+      <TeamSection me={me} />
+      <NotificationsSection me={me} />
 
       <section aria-labelledby="fields-h" className="grid gap-4">
         <div>

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AppDeps } from '../app';
@@ -11,8 +11,9 @@ import {
   SESSION_COOKIE,
   sessionCookieOptions,
 } from '../auth/sessions';
-import { users, workspaceMembers, workspaces } from '../db/schema';
+import { invites, users, workspaceMembers, workspaces } from '../db/schema';
 import { isPrivateAddress } from '../net';
+import { inviteHash } from './workspace';
 
 // Arbitrary constant for pg_advisory_xact_lock, so two first-run requests can't both become owner.
 const SETUP_LOCK_KEY = 7_340_001;
@@ -123,6 +124,95 @@ export const authRoutes =
       if (token) await deleteSession(db, token);
       reply.clearCookie(SESSION_COOKIE, { path: '/' });
       return reply.code(204).send();
+    });
+
+    /** A team invite that's still good (not used, not expired), with its workspace's name. */
+    const openInvite = async (token: string) => {
+      const [invite] = await db
+        .select({
+          id: invites.id,
+          workspaceId: invites.workspaceId,
+          email: invites.email,
+          role: invites.role,
+          workspaceName: workspaces.name,
+        })
+        .from(invites)
+        .innerJoin(workspaces, eq(workspaces.id, invites.workspaceId))
+        .where(
+          and(
+            eq(invites.tokenHash, inviteHash(token)),
+            isNull(invites.acceptedAt),
+            gt(invites.expiresAt, new Date()),
+          ),
+        );
+      return invite;
+    };
+    const tokenParam = z.object({ token: z.string().min(10).max(100) });
+
+    /** What an invite link is for, shown before accepting it. */
+    app.get('/invites/:token', async (req, reply) => {
+      const invite = await openInvite(tokenParam.parse(req.params).token);
+      if (!invite) return reply.code(404).send({ error: 'invite_invalid' });
+      const [existing] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, invite.email));
+      return {
+        email: invite.email,
+        role: invite.role,
+        workspaceName: invite.workspaceName,
+        accountExists: Boolean(existing),
+        signedInAs: req.user?.email ?? null,
+      };
+    });
+
+    /**
+     * Joins the team. New people make their account here (the email is the invite's); someone
+     * who already has one signs in first, then accepts.
+     */
+    app.post('/invites/:token/accept', { config: authRateLimit }, async (req, reply) => {
+      const invite = await openInvite(tokenParam.parse(req.params).token);
+      if (!invite) return reply.code(404).send({ error: 'invite_invalid' });
+      const [existing] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, invite.email));
+      if (existing && req.user?.id !== existing.id)
+        return reply.code(409).send({ error: 'sign_in_first' });
+      const body = existing
+        ? undefined
+        : z
+            .object({
+              firstName: z.string().trim().min(1, 'Enter your first name.').max(60),
+              lastName: z.string().trim().max(60).default(''),
+              password: z.string().min(10, 'Use at least 10 characters.').max(200),
+            })
+            .parse(req.body);
+      const passwordHash = body ? await hashPassword(body.password) : undefined;
+      const userId = await db.transaction(async (tx) => {
+        let id = existing?.id;
+        if (!id && body && passwordHash) {
+          const [created] = await tx
+            .insert(users)
+            .values({
+              email: invite.email,
+              firstName: body.firstName,
+              lastName: body.lastName,
+              passwordHash,
+            })
+            .returning({ id: users.id });
+          id = created?.id;
+        }
+        if (!id) throw new Error('invite accept made no user');
+        await tx
+          .insert(workspaceMembers)
+          .values({ workspaceId: invite.workspaceId, userId: id, role: invite.role })
+          .onConflictDoNothing();
+        await tx.update(invites).set({ acceptedAt: new Date() }).where(eq(invites.id, invite.id));
+        return id;
+      });
+      if (!existing) reply.setCookie(SESSION_COOKIE, ...(await startSession(userId, req)));
+      return reply.code(201).send({ ok: true });
     });
 
     app.get('/me', async (req, reply) => {

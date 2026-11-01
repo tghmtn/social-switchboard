@@ -12,7 +12,7 @@ import { processWebhookEvents } from '../instagram/events';
 import * as graph from '../instagram/graph';
 import { accountFor, decryptOptional, metaAppFor, metaSecrets } from '../instagram/settings';
 import { parseSignedRequestAny } from '../meta';
-import { notFound, requireWorkspace, who } from './guard';
+import { notFound, requireAdmin, requireWorkspace, who } from './guard';
 
 // Instagram: the Meta app settings the wizard collects, the login hand-off, the webhook Meta calls,
 // and the data the builder needs (connected accounts, recent posts).
@@ -411,7 +411,7 @@ export const instagramRoutes =
     app.get('/instagram/settings', async (req) => status(who(req).workspace.id));
 
     app.put('/instagram/settings', async (req) => {
-      const { workspace } = who(req);
+      const { workspace } = requireAdmin(req);
       const secret = z
         .string()
         .trim()
@@ -461,7 +461,7 @@ export const instagramRoutes =
 
     /** Sends the browser to Instagram's login, which comes back to /api/instagram/callback. */
     app.get('/instagram/connect', async (req, reply) => {
-      const { user, workspace } = who(req);
+      const { user, workspace } = requireAdmin(req);
       const s = await metaAppFor(db, workspace.id);
       const redirect = metaUrls(config.publicUrl).oauthRedirect;
       if (s.loginUrl && s.facebookAppSecretEnc) {
@@ -489,7 +489,7 @@ export const instagramRoutes =
 
     /** Finishes a Unified login with the account ID from Meta's Connected apps screen. */
     app.post('/instagram/accounts/by-id', async (req, reply) => {
-      const { workspace } = who(req);
+      const { workspace } = requireAdmin(req);
       const { igUserId } = z
         .object({
           igUserId: z
@@ -527,7 +527,7 @@ export const instagramRoutes =
     });
 
     app.delete('/instagram/accounts/:id', async (req, reply) => {
-      const { workspace } = who(req);
+      const { workspace } = requireAdmin(req);
       const { id } = z.object({ id: z.uuid() }).parse(req.params);
       const removed = await db
         .delete(instagramAccounts)

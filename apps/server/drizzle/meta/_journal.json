@@ -85,6 +85,20 @@
       "when": 1793505136337,
       "tag": "0011_inbox",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793505622373,
+      "tag": "0012_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793505740393,
+      "tag": "0013_invites",
+      "breakpoints": true
     }
   ]
 }

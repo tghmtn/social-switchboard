@@ -37,6 +37,9 @@ export const workspaces = pgTable('workspaces', {
   name: text('name').notNull(),
   /** IANA zone for time conditions and "until 09:00" delays. */
   timeZone: text('time_zone').notNull().default('UTC'),
+  /** Push notifications: an ntfy topic URL (ntfy.sh or self-hosted), and its token if it has one. */
+  notifyUrl: text('notify_url'),
+  notifyTokenEnc: text('notify_token_enc'),
   createdAt: createdAt(),
 });
 
@@ -80,6 +83,20 @@ export const sessions = pgTable(
   },
   (t) => [index('sessions_user_id_idx').on(t.userId)],
 );
+
+/** Team invites: a one-time link to join the workspace in a role. Only the link's hash is kept. */
+export const invites = pgTable('invites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: workspaceId(),
+  /** Stored lowercased, like users.email. */
+  email: text('email').notNull(),
+  role: memberRole('role').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  createdAt: createdAt(),
+});
 
 // ---------------------------------------------------------------- contacts
 

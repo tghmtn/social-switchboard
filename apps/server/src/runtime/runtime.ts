@@ -22,6 +22,7 @@ import {
   triggers,
   workspaces,
 } from '../db/schema';
+import type { Notice } from '../notify';
 import type { ChannelRegistry, SendResult } from './channels';
 import {
   addTag,
@@ -43,6 +44,12 @@ export type RuntimeDeps = {
   channels: ChannelRegistry;
   now?: () => Date;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
+  /** Push notifications (best effort; see notify.ts). */
+  notify?: (n: Notice) => void;
+};
+
+const notifyAll = (deps: RuntimeDeps, notices: Notice[]) => {
+  for (const n of notices) deps.notify?.(n);
 };
 
 export type Inbound = {
@@ -83,6 +90,8 @@ type Ctx = {
   now: Date;
   /** Message ids to deliver once the transaction commits. */
   queued: string[];
+  /** Push notifications to send once the transaction commits. */
+  notices: Notice[];
   /** How many "go to flow" hops this event has taken, to stop flows that call each other forever. */
   hops: number;
   /** Set when a comment started this: the first message is the comment's one private reply. */
@@ -106,6 +115,7 @@ export function decodePayload(payload: string) {
 /** Handles one inbound message, tap or entry-link visit from a contact. */
 export async function receive(deps: RuntimeDeps, input: Inbound) {
   const queued: string[] = [];
+  const notices: Notice[] = [];
   const contactId = await deps.db.transaction(async (tx) => {
     const { contactId, isNew } = await findOrCreateContact(
       tx,
@@ -130,13 +140,32 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
       content: { kind: 'in', text: input.text, payload: input.payload, ref: input.ref },
     });
     // A person has taken over this conversation: record the message, but don't automate.
-    if (contact?.pausedAt) return contactId;
+    if (contact?.pausedAt) {
+      notices.push({
+        workspaceId: input.workspaceId,
+        contactId,
+        channel: input.channel,
+        kind: 'paused',
+        text: input.text,
+      });
+      return contactId;
+    }
 
-    const ctx = await context(deps, tx, input.workspaceId, contactId, input.channel, now, queued);
+    const ctx = await context(
+      deps,
+      tx,
+      input.workspaceId,
+      contactId,
+      input.channel,
+      now,
+      queued,
+      notices,
+    );
     await route(ctx, input, isNew);
     return contactId;
   });
   await deliver(deps, queued);
+  notifyAll(deps, notices);
   return { contactId };
 }
 
@@ -146,6 +175,7 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
  */
 export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
   const queued: string[] = [];
+  const notices: Notice[] = [];
   const result = await deps.db.transaction(async (tx) => {
     const { contactId } = await findOrCreateContact(
       tx,
@@ -207,7 +237,16 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
       : undefined;
     if (!trigger || !version) return { contactId, triggered: false };
 
-    const ctx = await context(deps, tx, input.workspaceId, contactId, input.channel, now, queued);
+    const ctx = await context(
+      deps,
+      tx,
+      input.workspaceId,
+      contactId,
+      input.channel,
+      now,
+      queued,
+      notices,
+    );
     ctx.commentReply = { commentId: input.commentId, used: false };
     await cancelConversationRuns(ctx);
     await begin(ctx, version, { type: 'start' }, trigger.id);
@@ -240,6 +279,7 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
     return { contactId, triggered: true };
   });
   await deliver(deps, queued);
+  notifyAll(deps, notices);
   return result;
 }
 
@@ -296,7 +336,18 @@ async function route(ctx: Ctx, input: Inbound, isNew: boolean) {
     ref: input.ref,
     isNewContact: isNew,
   });
-  if (!trigger?.versionId) return;
+  if (!trigger?.versionId) {
+    // Nothing answers this one: someone should see it.
+    if (input.text !== undefined)
+      ctx.notices.push({
+        workspaceId: ctx.workspaceId,
+        contactId: ctx.contactId,
+        channel: ctx.channel,
+        kind: 'unanswered',
+        text: input.text,
+      });
+    return;
+  }
   const version = await loadVersion(ctx.tx, ctx.workspaceId, trigger.versionId);
   if (!version) return;
   await cancelConversationRuns(ctx);
@@ -309,6 +360,7 @@ export async function startFlow(
   args: { workspaceId: string; contactId: string; channel: string; versionId: string },
 ) {
   const queued: string[] = [];
+  const notices: Notice[] = [];
   const runId = await deps.db.transaction(async (tx) => {
     await lockContact(tx, args.contactId);
     const ctx = await context(
@@ -319,6 +371,7 @@ export async function startFlow(
       args.channel,
       deps.now?.() ?? new Date(),
       queued,
+      notices,
     );
     const version = await loadVersion(tx, args.workspaceId, args.versionId);
     if (!version) throw new Error(`flow version ${args.versionId} not found`);
@@ -326,12 +379,14 @@ export async function startFlow(
     return begin(ctx, version, { type: 'start' });
   });
   await deliver(deps, queued);
+  notifyAll(deps, notices);
   return runId;
 }
 
 /** Fires a due delay or reply timeout. Stale tokens (the run already moved on) are ignored. */
 export async function wake(deps: RuntimeDeps, runId: string, token: string) {
   const queued: string[] = [];
+  const notices: Notice[] = [];
   await deps.db.transaction(async (tx) => {
     const [peek] = await tx
       .select({ contactId: runs.contactId })
@@ -353,10 +408,20 @@ export async function wake(deps: RuntimeDeps, runId: string, token: string) {
         .where(eq(runs.id, run.id));
       return;
     }
-    const ctx = await context(deps, tx, run.workspaceId, run.contactId, run.channel, now, queued);
+    const ctx = await context(
+      deps,
+      tx,
+      run.workspaceId,
+      run.contactId,
+      run.channel,
+      now,
+      queued,
+      notices,
+    );
     await step(ctx, run, { type: 'wake', token });
   });
   await deliver(deps, queued);
+  notifyAll(deps, notices);
 }
 
 /** Wakes every run whose delay or timeout is due. Returns how many it looked at. */
@@ -456,6 +521,7 @@ async function context(
   channel: string,
   now: Date,
   queued: string[],
+  notices: Notice[],
 ): Promise<Ctx> {
   const [ws] = await tx
     .select({ timeZone: workspaces.timeZone })
@@ -470,6 +536,7 @@ async function context(
     timeZone: ws?.timeZone ?? 'UTC',
     now,
     queued,
+    notices,
     hops: 0,
   };
 }
@@ -664,12 +731,17 @@ async function persist(
         });
         break;
       case 'notify_team':
-        // Delivered as push/email notifications with the inbox in Phase 3; recorded on the timeline now.
         await recordEvent(tx, workspaceId, contactId, 'team_notified', {
           message: e.message,
           runId: run.id,
         });
-        ctx.deps.log?.('team notification', { contactId, message: e.message });
+        ctx.notices.push({
+          workspaceId,
+          contactId,
+          channel: ctx.channel,
+          kind: 'team',
+          text: e.message,
+        });
         break;
       case 'handoff':
         await tx
@@ -687,6 +759,13 @@ async function persist(
             ),
           );
         await recordEvent(tx, workspaceId, contactId, 'handoff', { note: e.note, runId: run.id });
+        ctx.notices.push({
+          workspaceId,
+          contactId,
+          channel: ctx.channel,
+          kind: 'handoff',
+          text: e.note,
+        });
         break;
       case 'start_flow':
         nextFlows.push(e.flowId);

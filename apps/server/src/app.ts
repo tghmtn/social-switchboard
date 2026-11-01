@@ -10,6 +10,7 @@ import { findSessionUser, SESSION_COOKIE, sessionCookieOptions } from './auth/se
 import type { Config } from './config';
 import type { Db } from './db/client';
 import { workspaceMembers, workspaces } from './db/schema';
+import { notifier } from './notify';
 import { authRoutes } from './routes/auth';
 import { contactRoutes } from './routes/contacts';
 import { flowRoutes } from './routes/flows';
@@ -20,6 +21,7 @@ import { legalRoutes } from './routes/legal';
 import { libraryRoutes } from './routes/library';
 import { overviewRoutes } from './routes/overview';
 import { simulatorRoutes } from './routes/simulator';
+import { workspaceRoutes } from './routes/workspace';
 import type { ChannelRegistry } from './runtime/channels';
 import { allChannels } from './runtime/registry';
 import type { RuntimeDeps } from './runtime/runtime';
@@ -105,6 +107,12 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
       channels: deps.channels ?? allChannels(deps.db, config.appSecret),
       now: deps.now,
       log: (msg, fields) => app.log.info(fields ?? {}, msg),
+      notify: notifier({
+        db: deps.db,
+        appSecret: config.appSecret,
+        publicUrl: config.publicUrl,
+        log: (msg, fields) => app.log.warn(fields ?? {}, msg),
+      }),
     },
   };
   await app.register(healthRoutes(deps), { prefix: '/api' });
@@ -119,6 +127,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     overviewRoutes,
     instagramRoutes,
     inboxRoutes,
+    workspaceRoutes,
   ]) {
     await app.register(routes(routeDeps), { prefix: '/api' });
   }

@@ -217,6 +217,14 @@ Each phase ends with something you can actually use.
 
 ### Phase 3: Inbox & team
 
+> **Status (2026-10-31): inbox, team and notifications built; Messenger waits on Meta setup.**
+> - **Inbox:** every real-channel conversation, newest first. Views (open, unread, mine, paused, closed, all), search, per-teammate unread counts (also on the nav). The thread shows comments, private and public replies, flow messages, replies typed in Instagram or the inbox (with who sent them), refusals with their reason, and internal notes. Replies from the inbox follow Instagram's 24-hour window and pause the bot for 12 hours; the bot can also be paused or turned back on by hand. Assign, close; a new message reopens. Lists check back every few seconds (polling, not websockets).
+> - **Human takeover:** a reply typed in the Instagram app (seen through its echo) pauses the bot for that person for 12 hours.
+> - **Team:** invite links (one-time, a week, hash-only storage; Switchboard can't email yet), roles: owners do everything, admins everything but roles, agents the inbox, contacts and flows (no channel, team or notification settings). The last owner can't be removed.
+> - **Notifications:** ntfy (ntfy.sh or self-hosted) on hand-offs, "notify the team" steps, messages while the bot is paused, and DMs nothing answered; at most one per person and kind every 10 minutes; tapping opens the conversation.
+> - **Installable:** a web app manifest and icons; "Add to Home Screen" opens the inbox full screen.
+> - **Not yet:** labels as inbox filters, saved replies, snooze, browser push and an email digest, and the **Facebook Messenger channel** (needs Messenger added to the Meta app and a Facebook Page).
+
 - **Unified realtime inbox:**
   - filters: open, assigned, unread, label, channel
   - labels, assign to a teammate, internal notes

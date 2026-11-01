@@ -16,3 +16,11 @@ export function who(req: FastifyRequest): { user: SessionUser; workspace: Reques
 export const notFound = (what: string) =>
   Object.assign(new Error(`${what} not found`), { statusCode: 404 });
 export const conflict = (message: string) => Object.assign(new Error(message), { statusCode: 409 });
+
+/** For settings only owners and admins may change (channels, team, notifications). */
+export function requireAdmin(req: FastifyRequest) {
+  const { workspace } = who(req);
+  if (workspace.role === 'agent')
+    throw Object.assign(new Error('Only owners and admins can change this.'), { statusCode: 403 });
+  return who(req);
+}
