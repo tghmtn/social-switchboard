@@ -24,6 +24,7 @@ import { legalRoutes } from './routes/legal';
 import { libraryRoutes } from './routes/library';
 import { overviewRoutes } from './routes/overview';
 import { simulatorRoutes } from './routes/simulator';
+import { webchatPublicRoutes, webchatRoutes } from './routes/webchat';
 import { workspaceRoutes } from './routes/workspace';
 import type { ChannelRegistry } from './runtime/channels';
 import { allChannels } from './runtime/registry';
@@ -133,6 +134,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
   await app.register(legalRoutes(routeDeps));
   await app.register(instagramPublicRoutes(routeDeps), { prefix: '/api' });
   await app.register(facebookPublicRoutes(routeDeps), { prefix: '/api' });
+  await app.register(webchatPublicRoutes(routeDeps), { prefix: '/api' });
   for (const routes of [
     contactRoutes,
     libraryRoutes,
@@ -144,6 +146,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     inboxRoutes,
     workspaceRoutes,
     assistantRoutes,
+    webchatRoutes,
   ]) {
     await app.register(routes(routeDeps), { prefix: '/api' });
   }

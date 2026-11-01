@@ -286,6 +286,8 @@ export const inboxRoutes =
         identities,
         /** Instagram replies are only allowed within 24 hours of their last DM. */
         replyWindowEndsAt: lastDm ? new Date(lastDm.createdAt.getTime() + DAY) : null,
+        /** Web chat has no window: the visitor sees a reply whenever they're back on the site. */
+        alwaysOpen: identities[0]?.channel === 'webchat',
         messages: rows.reverse().map((m) => {
           const content = m.content as {
             kind: string;

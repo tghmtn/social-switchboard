@@ -34,6 +34,14 @@ export type SmtpSettings = {
 };
 export type TwilioSettings = { accountSid: string; from: string };
 export type TelnyxSettings = { from: string };
+/** The chat window on the workspace's website: `key` is public (it's in the embed code). */
+export type WebchatSettings = {
+  enabled: boolean;
+  key: string;
+  title: string;
+  greeting: string;
+  color: string;
+};
 /** Who sends text-message alerts: both can be saved, one is in use. */
 export const SMS_PROVIDERS = ['twilio', 'telnyx'] as const;
 export type SmsProvider = (typeof SMS_PROVIDERS)[number];
@@ -76,6 +84,8 @@ export const workspaces = pgTable('workspaces', {
   telnyxKeyEnc: text('telnyx_key_enc'),
   /** Which of the two sends texts. Null: whichever is set up (Twilio first). */
   smsProvider: text('sms_provider').$type<SmsProvider>(),
+  /** The web chat window for the workspace's own website. */
+  webchat: jsonb('webchat').$type<WebchatSettings | null>(),
   /**
    * AI, bring your own key. Both providers' keys (encrypted) and models can be saved; aiProvider
    * picks the one every AI feature uses. aiModel and aiKeyEnc are Anthropic's.

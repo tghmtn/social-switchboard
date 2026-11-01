@@ -29,7 +29,7 @@ const TABS: { to: string; label: string; icon: SquareIconName; end?: boolean }[]
   { to: '/contacts', label: 'Contacts', icon: 'kit' },
 ];
 const MORE: { to: string; label: string; icon: SquareIconName; detail: string }[] = [
-  { to: '/channels', label: 'Channels', icon: 'chat', detail: 'Instagram, Facebook' },
+  { to: '/channels', label: 'Channels', icon: 'chat', detail: 'Instagram, Facebook, web chat' },
   { to: '/simulator', label: 'Simulator', icon: 'phone', detail: 'Test flows like a follower' },
   { to: '/settings', label: 'Settings', icon: 'sliders', detail: 'Team, alerts, AI, fields' },
 ];

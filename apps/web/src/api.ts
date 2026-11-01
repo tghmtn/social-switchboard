@@ -300,6 +300,8 @@ export type InboxDetail = {
   identities: { channel: string; username: string | null; followsUs: boolean | null }[];
   /** Instagram replies are allowed until then (24 hours after their last DM). */
   replyWindowEndsAt: string | null;
+  /** Web chat: replies go any time (no 24-hour window). */
+  alwaysOpen: boolean;
   messages: {
     id: string;
     seq: number;

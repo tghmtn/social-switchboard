@@ -292,7 +292,11 @@ Each phase ends with something you can actually use.
 
 Each channel is a self-contained adapter. The Channels page already lists Facebook, TikTok, YouTube and LinkedIn as "Coming later" (2026-10-31).
 
-1. **Web chat widget.** Embeds on a Ghost or any other website. No Meta dependency.
+> **Status (2026-11-01): web chat built.**
+> - **Web chat:** Channels → Web chat turns on a chat button for the workspace's own website, with its title, greeting and color. One line of embed code (`/webchat.js` with a public key) draws the button in a shadow root and opens the chat in a frame from the Switchboard server, so the site's styles never mix in. A stand-in test page tries it before it's on a real site. Visitors are anonymous: a random token kept in their browser (stored only as a hash) is their id. Flows answer through the usual welcome, keyword and default-reply triggers; quick replies and buttons work by message and id, so internal payloads never reach the page. Conversations land in the Inbox as "Website visitor", with no reply window. Polling, not websockets; per-IP rate limits on the public routes. A site button can open it with `SwitchboardChat.open()`.
+> - **Not yet:** an unread dot on the closed button, starting a flow when the chat opens (before they type), file uploads from visitors, and limiting which sites may embed it.
+
+1. **Web chat widget** (built 2026-11-01). Embeds on a Ghost or any other website. No Meta dependency.
 2. **TikTok.** Business messaging; eligibility and region limits apply, and it's unavailable in the EU and UK.
 3. **SMS** via Twilio or similar. US A2P 10DLC registration is required.
 4. **WhatsApp** via the Cloud API. Needs approved templates and has per-message charges; marketing templates to US numbers are paused.

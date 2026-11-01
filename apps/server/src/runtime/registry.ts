@@ -1,7 +1,7 @@
 import type { Db } from '../db/client';
 import { facebookChannel } from '../facebook/channel';
 import { instagramChannel } from '../instagram/channel';
-import { type ChannelRegistry, simulatorChannel } from './channels';
+import { type ChannelRegistry, simulatorChannel, webchatChannel } from './channels';
 
 /** Every channel this install can send on. */
 export const allChannels = (db: Db, appSecret: string): ChannelRegistry =>
@@ -9,4 +9,5 @@ export const allChannels = (db: Db, appSecret: string): ChannelRegistry =>
     [simulatorChannel.id, simulatorChannel],
     ['instagram', instagramChannel(db, appSecret)],
     ['facebook', facebookChannel(db, appSecret)],
+    [webchatChannel.id, webchatChannel],
   ]);

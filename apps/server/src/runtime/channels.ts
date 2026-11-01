@@ -27,7 +27,19 @@ export const simulatorChannel: ChannelAdapter = {
   send: async () => ({ status: 'sent' }),
 };
 
+/**
+ * The chat window on the workspace's own website. Like the simulator, a message "arrives" by being
+ * stored: the visitor's chat window picks it up (now, or whenever they come back).
+ */
+export const webchatChannel: ChannelAdapter = {
+  id: 'webchat',
+  send: async () => ({ status: 'sent' }),
+};
+
 export type ChannelRegistry = Map<string, ChannelAdapter>;
 
 export const defaultChannels = (): ChannelRegistry =>
-  new Map([[simulatorChannel.id, simulatorChannel]]);
+  new Map([
+    [simulatorChannel.id, simulatorChannel],
+    [webchatChannel.id, webchatChannel],
+  ]);

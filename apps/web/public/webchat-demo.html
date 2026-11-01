@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Web chat test page</title>
+    <!-- A stand-in website, so the team can try the web chat before it's on their real site. -->
+    <style>
+      body {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 48px 20px;
+        font: 16px/1.6 Georgia, serif;
+        color: #222;
+        background: #fbfaf7;
+      }
+      h1 {
+        font-size: 28px;
+      }
+      .note {
+        padding: 12px 16px;
+        border-left: 4px solid #5b2ef0;
+        background: #fff;
+        font-family: system-ui, sans-serif;
+        font-size: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Your website</h1>
+    <p class="note">
+      This page stands in for your website, so you can try the chat the way a visitor would: click
+      the button in the bottom corner. Conversations here are real and show up in your Inbox.
+    </p>
+    <p>
+      Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer posuere erat a ante. Morbi leo
+      risus, porta ac consectetur ac, vestibulum at eros. Cras mattis consectetur purus sit amet
+      fermentum. Donec ullamcorper nulla non metus auctor fringilla.
+    </p>
+    <script>
+      // Loads the chat with the key from the address, like the embed code would.
+      const key = new URLSearchParams(location.search).get('key');
+      if (key) {
+        const s = document.createElement('script');
+        s.src = '/webchat.js';
+        s.dataset.key = key;
+        s.async = true;
+        document.body.append(s);
+      }
+    </script>
+  </body>
+</html>

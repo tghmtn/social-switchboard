@@ -1,4 +1,5 @@
 import {
+  ChatCircleDots,
   FacebookLogo,
   InstagramLogo,
   LinkedinLogo,
@@ -35,6 +36,7 @@ const LATER: { name: string; icon: PhosphorIcon; detail: string }[] = [
 export function Channels() {
   const { data: s } = useApi<InstagramSettings>('/instagram/settings');
   const { data: fb } = useApi<FacebookSettings>('/facebook/settings');
+  const { data: wc } = useApi<{ settings: { enabled: boolean } }>('/webchat/settings');
   const pages = fb?.pages.filter((p) => p.status === 'connected') ?? [];
   const connected = s?.accounts.filter((a) => a.status === 'connected') ?? [];
   const attention = s?.accounts.some((a) => a.status !== 'connected' || a.statusDetail);
@@ -82,6 +84,21 @@ export function Channels() {
             {fb?.pages.some((p) => p.status !== 'connected') && (
               <span className="chip chip-danger">Needs attention</span>
             )}
+          </span>
+        </Link>
+        <Link
+          to="/channels/webchat"
+          className="card press grid content-start gap-3 text-ink no-underline"
+        >
+          <span className="flex items-center gap-3">
+            <Icon icon={ChatCircleDots} size={40} />
+            <span className="text-lg font-bold">Web chat</span>
+          </span>
+          <span className="text-[14px] text-muted">
+            A chat button for your own website, running the same flows.
+          </span>
+          <span className={`chip w-fit ${wc?.settings.enabled ? 'chip-success' : 'chip-orange'}`}>
+            {wc?.settings.enabled ? 'On' : 'Not set up'}
           </span>
         </Link>
         {LATER.map((c) => (

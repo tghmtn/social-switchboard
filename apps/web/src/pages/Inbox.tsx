@@ -1,4 +1,10 @@
-import { FacebookLogo, Funnel, InstagramLogo, Lightning } from '@phosphor-icons/react';
+import {
+  ChatCircleDots,
+  FacebookLogo,
+  Funnel,
+  InstagramLogo,
+  Lightning,
+} from '@phosphor-icons/react';
 import { renderTemplate } from '@social-switchboard/flow';
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -36,7 +42,9 @@ const VIEWS: { id: InboxView; label: string }[] = [
 const CHANNELS = [
   { id: 'instagram', label: 'Instagram' },
   { id: 'facebook', label: 'Facebook' },
+  { id: 'webchat', label: 'Web chat' },
 ];
+const CHANNEL_ICONS = { instagram: InstagramLogo, facebook: FacebookLogo, webchat: ChatCircleDots };
 
 /** Calls reload every `ms` while the page is visible. */
 function usePolling(reload: () => unknown, ms: number) {
@@ -273,12 +281,16 @@ function Conversation({ id, onChange }: { id: string; onChange: () => void }) {
   if (error) return <p className="p-6 font-bold text-danger">This conversation doesn’t exist.</p>;
   if (!data) return <p className="p-6 text-muted">Loading…</p>;
   const c = data.contact;
-  const name = contactName({ ...c, username: data.identities[0]?.username });
+  const name = contactName({
+    ...c,
+    username: data.identities[0]?.username,
+    channel: data.identities[0]?.channel,
+  });
   const ig = data.identities.find((i) => i.channel === 'instagram');
   // The channel they talk to us on (the first identity), named in the header and the reply box.
   const via = data.identities[0];
-  const onFacebook = via?.channel === 'facebook';
-  const channelName = onFacebook ? 'Facebook' : 'Instagram';
+  const channelId = (via?.channel ?? 'instagram') as keyof typeof CHANNEL_ICONS;
+  const channelName = CHANNELS.find((x) => x.id === channelId)?.label ?? 'Instagram';
   const refresh = () => {
     void reload();
     onChange();
@@ -307,7 +319,7 @@ function Conversation({ id, onChange }: { id: string; onChange: () => void }) {
               {name}
             </Link>
             <p className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">
-              {via && <Icon icon={onFacebook ? FacebookLogo : InstagramLogo} size={16} />}
+              {via && <Icon icon={CHANNEL_ICONS[channelId] ?? InstagramLogo} size={16} />}
               <span className="truncate">
                 {via?.username ? `@${via.username}` : channelName}
                 {ig?.followsUs ? ' · follows you' : ''}
@@ -383,6 +395,7 @@ function Conversation({ id, onChange }: { id: string; onChange: () => void }) {
         channel={channelName}
         contact={c}
         windowEndsAt={data.replyWindowEndsAt}
+        alwaysOpen={data.alwaysOpen}
         onSent={refresh}
       />
     </>
@@ -636,13 +649,16 @@ function Composer({
   channel,
   contact,
   windowEndsAt,
+  alwaysOpen,
   onSent,
 }: {
   id: string;
-  /** Instagram or Facebook, for the reply-window notes. */
+  /** Instagram, Facebook or Web chat, for the reply-window notes. */
   channel: string;
   contact: InboxDetail['contact'];
   windowEndsAt: string | null;
+  /** Web chat: no reply window. */
+  alwaysOpen: boolean;
   onSent: () => void;
 }) {
   const [mode, setMode] = useState<'reply' | 'note'>('reply');
@@ -662,7 +678,8 @@ function Composer({
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [text]);
-  const open = windowEndsAt !== null && new Date(windowEndsAt).getTime() > Date.now();
+  const open =
+    alwaysOpen || (windowEndsAt !== null && new Date(windowEndsAt).getTime() > Date.now());
   const canSend = mode === 'note' || open;
 
   // "/pri" at the start looks up saved replies named like "pri"; ⚡ shows them all.
@@ -767,11 +784,13 @@ function Composer({
         ))}
         {mode === 'reply' && (
           <span className="ml-auto text-right text-[12px] text-muted sm:text-[13px]">
-            {open
-              ? `You can reply until ${clock(windowEndsAt ?? '')}`
-              : windowEndsAt
-                ? `Their last message was over 24 hours ago, so ${channel} won’t deliver a reply until they write again.`
-                : `They haven’t messaged yet: ${channel} allows replies only after they do.`}
+            {alwaysOpen
+              ? 'They’ll see your reply in the chat on your site, now or when they’re back.'
+              : open
+                ? `You can reply until ${clock(windowEndsAt ?? '')}`
+                : windowEndsAt
+                  ? `Their last message was over 24 hours ago, so ${channel} won’t deliver a reply until they write again.`
+                  : `They haven’t messaged yet: ${channel} allows replies only after they do.`}
           </span>
         )}
       </div>

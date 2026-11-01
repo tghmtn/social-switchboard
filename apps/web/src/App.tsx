@@ -15,6 +15,7 @@ import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { Shell } from './pages/Shell';
 import { SimulatorPage } from './pages/SimulatorPage';
+import { WebchatChannel } from './pages/WebchatChannel';
 
 type State =
   | { kind: 'loading' }
@@ -82,6 +83,7 @@ export function App() {
               <Route path="/channels" element={<Channels />} />
               <Route path="/channels/instagram" element={<InstagramChannel />} />
               <Route path="/channels/facebook" element={<FacebookChannel />} />
+              <Route path="/channels/webchat" element={<WebchatChannel />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/inbox/:id" element={<Inbox />} />
               <Route path="/settings" element={<Settings me={state.me} />} />
