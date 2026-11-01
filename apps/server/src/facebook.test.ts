@@ -92,6 +92,8 @@ describe.skipIf(!databaseUrl)('Facebook Pages end to end (fake Meta)', () => {
   let cookies: Record<string, string> = {};
   let calls: Call[] = [];
   let setups = 0;
+  /** Login for Business tokens: nothing in the lists, only in the token's grants. */
+  let listsEmpty = false;
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -104,6 +106,21 @@ describe.skipIf(!databaseUrl)('Facebook Pages end to end (fake Meta)', () => {
       return json({
         access_token: url.searchParams.get('grant_type') ? 'long-user-token' : 'short-user-token',
       });
+    if (listsEmpty && (path === '/me/accounts' || path === '/me/businesses'))
+      return json({ data: [] });
+    if (path === '/debug_token')
+      return json({
+        data: {
+          type: 'SYSTEM_USER',
+          scopes: ['pages_messaging', 'pages_show_list'],
+          granular_scopes: [
+            { scope: 'pages_messaging', target_ids: [PAGE] },
+            { scope: 'pages_show_list', target_ids: [PAGE] },
+          ],
+        },
+      });
+    if (path === `/${PAGE}`)
+      return json({ id: PAGE, name: 'Pottery Studio', access_token: 'page-token' });
     if (path === '/me/accounts')
       return json({
         data: [
@@ -185,6 +202,7 @@ describe.skipIf(!databaseUrl)('Facebook Pages end to end (fake Meta)', () => {
   });
   beforeEach(async () => {
     calls = [];
+    listsEmpty = false;
     setEchoGraceMs(30_000);
     await db.execute(sql`truncate workspaces, users, webhook_events cascade`);
     const res = await app.inject({
@@ -244,6 +262,23 @@ describe.skipIf(!databaseUrl)('Facebook Pages end to end (fake Meta)', () => {
     const again = new URL(String((await call('GET', '/api/facebook/connect')).headers.location));
     expect(again.searchParams.get('config_id')).toBe('998877665544');
     expect(again.searchParams.has('scope')).toBe(false);
+  });
+
+  it('finds the Page from what the login granted when the lists are empty', async () => {
+    listsEmpty = true;
+    await call('PUT', '/api/facebook/settings', {
+      appId: APP_ID,
+      appSecret: FB_SECRET,
+      configId: '998877665544',
+    });
+    const start = new URL(String((await call('GET', '/api/facebook/connect')).headers.location));
+    const back = await call(
+      'GET',
+      `/api/facebook/callback?code=abc&state=${encodeURIComponent(start.searchParams.get('state') ?? '')}`,
+    );
+    expect(String(back.headers.location)).toBe('/channels/facebook?connected=Pottery+Studio');
+    const debug = calls.find((c) => c.url.pathname.endsWith('/debug_token'));
+    expect(debug?.url.searchParams.get('access_token')).toBe(`${APP_ID}|${FB_SECRET}`);
   });
 
   it('turns a Page comment into a private reply, and the Messenger reply continues it', async () => {

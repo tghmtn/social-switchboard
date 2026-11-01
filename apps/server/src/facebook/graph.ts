@@ -1,4 +1,4 @@
-import { graphRequest, type MetaError, VERSIONS } from '../instagram/graph';
+import { graphRequest, MetaError, VERSIONS } from '../instagram/graph';
 
 // The Facebook Graph API for Pages: Facebook Login, the Pages a person can connect, webhook
 // subscriptions, Messenger's Send API, comment replies and profiles. Shapes follow Meta's docs and
@@ -66,53 +66,106 @@ type PageRow = {
 };
 
 /**
- * The Pages this person can manage: their own (/me/accounts) and, like Postiz does, those their
- * Business portfolios own or manage for clients, which /me/accounts often leaves out.
+ * The Pages a login can act for. Meta doesn't list them in one place, so we look in each, as
+ * Postiz and our Instagram login do: the person's own Pages (/me/accounts), those their Business
+ * portfolios own or manage for clients, and the Pages the token itself was granted (debug_token),
+ * fetched one by one. That last one catches Facebook Login for Business, whose tokens often show
+ * nothing in the lists. `notes` records what each step found (counts and errors, never tokens).
  */
-export async function listPages(userToken: string): Promise<ListedPage[]> {
+export async function listPages(
+  userToken: string,
+  app?: { id: string; secret: string },
+): Promise<{ pages: ListedPage[]; notes: string[] }> {
   const fields = 'id,name,access_token,picture.type(large)';
   const auth = { headers: { Authorization: `Bearer ${userToken}` } };
   const found = new Map<string, ListedPage>();
+  const notes: string[] = [];
   const add = (rows: PageRow[]) => {
+    let added = 0;
     for (const p of rows)
-      if (p.access_token && !found.has(p.id))
+      if (p.access_token && !found.has(p.id)) {
         found.set(p.id, {
           id: p.id,
           name: p.name,
           access_token: p.access_token,
           picture: p.picture?.data?.url,
         });
+        added++;
+      }
+    return added;
   };
-  add(
-    (
+  const why = (err: unknown) =>
+    err instanceof MetaError ? `error ${err.code} ${err.message}` : String(err);
+
+  try {
+    const rows = (
       await graphRequest<{ data: PageRow[] }>(
         `${base()}/me/accounts?fields=${fields}&limit=100`,
         auth,
       )
-    ).data,
-  );
+    ).data;
+    notes.push(`me/accounts: ${rows.length} (with tokens: ${add(rows)})`);
+  } catch (err) {
+    notes.push(`me/accounts: ${why(err)}`);
+  }
   try {
     const businesses = await graphRequest<{ data: { id: string }[] }>(
       `${base()}/me/businesses?limit=50`,
       auth,
     );
+    notes.push(`businesses: ${businesses.data.length}`);
     for (const b of businesses.data)
       for (const edge of ['owned_pages', 'client_pages']) {
         try {
-          add(
-            (
-              await graphRequest<{ data: PageRow[] }>(
-                `${base()}/${b.id}/${edge}?fields=${fields}&limit=100`,
-                auth,
-              )
-            ).data,
-          );
-        } catch {}
+          const rows = (
+            await graphRequest<{ data: PageRow[] }>(
+              `${base()}/${b.id}/${edge}?fields=${fields}&limit=100`,
+              auth,
+            )
+          ).data;
+          notes.push(`${edge}: ${rows.length} (with tokens: ${add(rows)})`);
+        } catch (err) {
+          notes.push(`${edge}: ${why(err)}`);
+        }
       }
-  } catch {
-    // No business_management permission: /me/accounts is all there is.
+  } catch (err) {
+    notes.push(`businesses: ${why(err)}`);
   }
-  return [...found.values()];
+  if (app) {
+    try {
+      const debug = await graphRequest<{
+        data?: {
+          type?: string;
+          scopes?: string[];
+          granular_scopes?: { scope: string; target_ids?: string[] }[];
+        };
+      }>(
+        `${base()}/debug_token?${new URLSearchParams({ input_token: userToken, access_token: `${app.id}|${app.secret}` })}`,
+      );
+      const granular = debug.data?.granular_scopes ?? [];
+      notes.push(
+        `granted: type=${debug.data?.type ?? '?'} scopes=${(debug.data?.scopes ?? []).join(',') || 'none'} targets=${
+          granular.map((g) => `${g.scope}:${g.target_ids?.length ?? 'all'}`).join(',') || 'none'
+        }`,
+      );
+      const ids = [
+        ...new Set(
+          granular.filter((g) => g.scope.startsWith('pages_')).flatMap((g) => g.target_ids ?? []),
+        ),
+      ].filter((id) => !found.has(id));
+      for (const id of ids) {
+        try {
+          const row = await graphRequest<PageRow>(`${base()}/${id}?fields=${fields}`, auth);
+          notes.push(`granted page: ${add([row]) ? 'ok' : 'no page token'}`);
+        } catch (err) {
+          notes.push(`granted page: ${why(err)}`);
+        }
+      }
+    } catch (err) {
+      notes.push(`debug_token: ${why(err)}`);
+    }
+  }
+  return { pages: [...found.values()], notes };
 }
 
 const bearer = (token: string) => ({

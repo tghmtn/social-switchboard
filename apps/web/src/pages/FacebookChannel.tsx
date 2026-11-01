@@ -293,7 +293,9 @@ function Setup({
         </StepItem>
         <StepItem n={2} title="Allow this install’s login address">
           <p>
-            In Facebook Login’s settings, add this to <b>Valid OAuth Redirect URIs</b>:
+            In Facebook Login (for Business) → Settings, add this to{' '}
+            <b>Valid OAuth Redirect URIs</b>, next to Instagram’s. It’s where Facebook sends you
+            back after logging in; it is not the webhook address:
           </p>
           <CopyText text={s.urls.oauthRedirect} />
         </StepItem>
@@ -342,7 +344,9 @@ function Setup({
             use the same callback URL and verify token as Instagram:
           </p>
           <div className="grid gap-1.5">
-            <span className="text-[13px] text-muted">Callback URL</span>
+            <span className="text-[13px] text-muted">
+              Callback URL (the webhook address, same as Instagram’s; not the login address above)
+            </span>
             <CopyText text={s.urls.webhook} />
             <span className="text-[13px] text-muted">Verify token</span>
             <CopyText text={s.webhookVerifyToken} />

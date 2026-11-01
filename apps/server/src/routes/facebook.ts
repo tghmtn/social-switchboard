@@ -85,7 +85,8 @@ export const facebookPublicRoutes =
           facebookRedirect(config.publicUrl),
           q.code,
         );
-        const pages = await fb.listPages(userToken);
+        const { pages, notes } = await fb.listPages(userToken, { id: appId, secret: appSecret });
+        req.log.info({ notes }, 'facebook login: pages found');
         if (pages.length === 0)
           return back({
             error:
