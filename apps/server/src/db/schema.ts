@@ -43,8 +43,8 @@ export const NOTICE_KINDS = [
   'snooze',
 ] as const;
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
-/** browser: Switchboard's own notifications (Web Push); push: an ntfy topic. */
-export const ALERT_CHANNELS = ['browser', 'push', 'email', 'sms'] as const;
+/** browser: Switchboard's own notifications (Web Push), on the devices each person turns on. */
+export const ALERT_CHANNELS = ['browser', 'email', 'sms'] as const;
 export type AlertChannel = (typeof ALERT_CHANNELS)[number];
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -61,9 +61,6 @@ export const workspaces = pgTable('workspaces', {
   name: text('name').notNull(),
   /** IANA zone for time conditions and "until 09:00" delays. */
   timeZone: text('time_zone').notNull().default('UTC'),
-  /** Push notifications: an ntfy topic URL (ntfy.sh or self-hosted), and its token if it has one. */
-  notifyUrl: text('notify_url'),
-  notifyTokenEnc: text('notify_token_enc'),
   /** Email alerts go out through this SMTP server (any provider); its password is encrypted. */
   smtp: jsonb('smtp').$type<SmtpSettings | null>(),
   smtpPassEnc: text('smtp_pass_enc'),
@@ -139,8 +136,8 @@ export const invites = pgTable('invites', {
 });
 
 /**
- * Where each teammate wants alerts: their own push topic, email and phone, and which events go
- * where. No row means the defaults (see notify.ts).
+ * Where each teammate wants alerts: their email and phone, and which events go where (their
+ * devices are push_subscriptions). No row means the defaults (see notify.ts).
  */
 export const notificationPrefs = pgTable(
   'notification_prefs',
@@ -149,9 +146,6 @@ export const notificationPrefs = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    /** An ntfy topic URL for this person's phone. */
-    pushUrl: text('push_url'),
-    pushTokenEnc: text('push_token_enc'),
     /** Defaults to their sign-in email when empty. */
     email: text('email'),
     /** E.164, like +18015551234. */

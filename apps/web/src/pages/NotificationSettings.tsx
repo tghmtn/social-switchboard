@@ -4,10 +4,10 @@ import { currentSubscription, needsInstall, pushSupported, turnOffHere, turnOnHe
 import { Field, FormError, SecretField, Select, timeAgo } from '../ui';
 
 // Settings → Notifications: everyone picks which alerts reach them and how (Switchboard's own
-// notifications on their devices, ntfy, email, text); owners and admins set up the other ways
-// alerts are sent (a shared ntfy topic, an SMTP server, a Twilio account).
+// notifications on their devices, email, text); owners and admins set up email (an SMTP server)
+// and texts (a Twilio account).
 
-type Channel = 'browser' | 'push' | 'email' | 'sms';
+type Channel = 'browser' | 'email' | 'sms';
 type Device = {
   id: string;
   label: string;
@@ -16,8 +16,6 @@ type Device = {
   lastSentAt: string | null;
 };
 type Settings = {
-  url: string | null;
-  hasToken: boolean;
   email: {
     host: string;
     port: number;
@@ -29,8 +27,6 @@ type Settings = {
   } | null;
   sms: { accountSid: string; from: string; hasToken: boolean } | null;
   mine: {
-    pushUrl: string | null;
-    hasPushToken: boolean;
     email: string | null;
     accountEmail: string;
     phone: string | null;
@@ -43,7 +39,6 @@ type Settings = {
 
 const CHANNELS: { id: Channel; label: string }[] = [
   { id: 'browser', label: 'App' },
-  { id: 'push', label: 'ntfy' },
   { id: 'email', label: 'Email' },
   { id: 'sms', label: 'Text' },
 ];
@@ -206,7 +201,7 @@ function Result({ message }: { message: Message }) {
   );
 }
 
-const reveal = (which: 'team' | 'email' | 'sms' | 'push') => async () =>
+const reveal = (which: 'email' | 'sms') => async () =>
   (await api<{ value: string }>('/settings/notifications/reveal', { which })).value;
 
 export function NotificationsSection({ me }: { me: Me }) {
@@ -223,7 +218,7 @@ export function NotificationsSection({ me }: { me: Me }) {
         </h2>
         <p className="mt-1 text-[15px] text-muted">
           Alerts when a conversation needs someone. Everyone picks what reaches them and how; owners
-          and admins set up how alerts are sent. Tapping one opens the conversation.
+          and admins set up email and texts. Tapping one opens the conversation.
         </p>
       </div>
       {s && (
@@ -231,8 +226,7 @@ export function NotificationsSection({ me }: { me: Me }) {
           <ThisDevice settings={s} reload={settings.reload} />
           <MyAlerts settings={s} reload={settings.reload} />
           <div className="grid gap-3">
-            <h3 className="font-bold">How alerts are sent</h3>
-            <PushSender settings={s} isAdmin={isAdmin} reload={settings.reload} />
+            <h3 className="font-bold">Email and texts</h3>
             <EmailSender settings={s} isAdmin={isAdmin} reload={settings.reload} />
             <SmsSender settings={s} isAdmin={isAdmin} reload={settings.reload} />
           </div>
@@ -384,7 +378,6 @@ function ThisDevice({ settings: s, reload }: { settings: Settings; reload: () =>
 /** This teammate's own addresses and which alerts go where. */
 function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => Promise<void> }) {
   const [events, setEvents] = useState(s.mine.events);
-  const [pushUrl, setPushUrl] = useState(s.mine.pushUrl ?? '');
   const [phone, setPhone] = useState(s.mine.phone ?? '');
   const [message, setMessage] = useState<Message>();
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -393,7 +386,6 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
   // A channel can be picked once it can actually reach this person.
   const ready: Record<Channel, string | undefined> = {
     browser: s.mine.devices.length ? undefined : 'Turn notifications on for a device above.',
-    push: pushUrl.trim() ? undefined : 'Add your ntfy topic below.',
     email: s.email ? undefined : 'An owner or admin needs to set up email.',
     sms: !s.sms
       ? 'An owner or admin needs to set up text messages.'
@@ -406,7 +398,6 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     const email = String(form.get('email') ?? '').trim();
-    const pushToken = String(form.get('pushToken') ?? '').trim();
     setBusy(true);
     setMessage(undefined);
     setErrors({});
@@ -414,8 +405,6 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
       await api(
         '/settings/notifications/mine',
         {
-          pushUrl: pushUrl.trim() || null,
-          ...(pushToken && { pushToken }),
           email: email || null,
           phone: phone.trim() || null,
           events,
@@ -440,7 +429,6 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
         ok: true,
         text: {
           browser: 'Sent. It should pop up in a moment.',
-          push: 'Sent. It should be on your phone now.',
           email: 'Sent. Check your inbox (and spam, the first time).',
           sms: 'Sent. It should arrive in a few seconds.',
         }[to],
@@ -464,7 +452,7 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
               <span className="font-bold">{k.label}</span>
               <span className="block text-[13px] text-muted">{k.help}</span>
             </span>
-            <span className="grid grid-cols-4 gap-1.5 sm:flex">
+            <span className="grid grid-cols-3 gap-1.5 sm:flex">
               {CHANNELS.map((c) => {
                 const on = (events[k.id] ?? []).includes(c.id) && !ready[c.id];
                 return (
@@ -508,33 +496,6 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <Field
-            label="ntfy topic"
-            name="pushUrl"
-            type="url"
-            value={pushUrl}
-            onChange={(e) => setPushUrl(e.target.value)}
-            placeholder="https://ntfy.sh/your-long-random-topic"
-            error={errors.pushUrl}
-            hint="Install the free ntfy app and subscribe to this topic."
-          />
-          {!pushUrl && (
-            <button
-              type="button"
-              className="linkbtn w-fit text-[13px]"
-              onClick={() => {
-                const bytes = crypto.getRandomValues(new Uint8Array(12));
-                const id = Array.from(bytes, (b) => b.toString(36).padStart(2, '0'))
-                  .join('')
-                  .slice(0, 18);
-                setPushUrl(`https://ntfy.sh/switchboard-${id}`);
-              }}
-            >
-              Make one for me
-            </button>
-          )}
-        </div>
         <Field
           label="Email"
           name="email"
@@ -554,25 +515,12 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
           error={errors.phone}
           hint="With the country code."
         />
-        <SecretField
-          label="ntfy topic token (only if your topic needs one)"
-          name="pushToken"
-          saved={s.mine.hasPushToken}
-          hint={s.mine.hasPushToken ? 'Saved and encrypted.' : undefined}
-          placeholder="tk_…"
-          reveal={reveal('push')}
-        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="submit" className="btn btn-primary" disabled={busy}>
           Save
         </button>
-        {s.mine.pushUrl && (
-          <button type="button" className="btn" onClick={() => void test('push')}>
-            Test ntfy
-          </button>
-        )}
         {s.email && (
           <button type="button" className="btn" onClick={() => void test('email')}>
             Test email
@@ -612,92 +560,6 @@ function SenderCard({
       </summary>
       <div className="grid gap-3 border-t-2 border-line px-5 py-4">{children}</div>
     </details>
-  );
-}
-
-function PushSender({
-  settings: s,
-  isAdmin,
-  reload,
-}: {
-  settings: Settings;
-  isAdmin: boolean;
-  reload: () => Promise<void>;
-}) {
-  const [message, setMessage] = useState<Message>();
-
-  async function save(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const url = String(form.get('url') ?? '').trim();
-    const token = String(form.get('token') ?? '').trim();
-    setMessage(undefined);
-    try {
-      await api('/settings/notifications', { url: url || null, ...(token && { token }) }, 'PUT');
-      await reload();
-      setMessage({ ok: true, text: url ? 'Saved. Send a test to check it.' : 'Team topic off.' });
-    } catch (err) {
-      setMessage({ ok: false, text: errorText(err, 'Couldn’t save.') });
-    }
-  }
-
-  return (
-    <SenderCard title="Push (ntfy)" status={s.url ? 'Team topic on' : 'Ready'} ok>
-      <p className="text-[14px] text-muted">
-        Pushes go through{' '}
-        <a href="https://ntfy.sh" target="_blank" rel="noopener noreferrer">
-          ntfy
-        </a>{' '}
-        (free app; ntfy.sh or your own server), to each person’s own topic. Nothing to set up here
-        unless you want a shared team topic: it hears every alert except personal assignments, handy
-        for a shared phone or a team channel.
-      </p>
-      <form onSubmit={save} className="grid gap-3" autoComplete="off">
-        <Field
-          label="Shared team topic (optional)"
-          name="url"
-          type="url"
-          defaultValue={s.url ?? ''}
-          placeholder="https://ntfy.sh/pick-a-long-random-topic"
-          disabled={!isAdmin}
-          hint="Anyone who knows a topic on ntfy.sh can read it, so make the name long and random, or use your own server."
-        />
-        <SecretField
-          label="Access token (if the topic needs one)"
-          name="token"
-          saved={s.hasToken}
-          hint={s.hasToken ? 'Saved and encrypted.' : undefined}
-          placeholder="tk_…"
-          disabled={!isAdmin}
-          reveal={isAdmin ? reveal('team') : undefined}
-        />
-        {isAdmin && (
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" className="btn btn-primary">
-              Save
-            </button>
-            {s.url && (
-              <button
-                type="button"
-                className="btn"
-                onClick={async () => {
-                  setMessage(undefined);
-                  try {
-                    await api('/settings/notifications/test', { to: 'team' });
-                    setMessage({ ok: true, text: 'Sent to the team topic.' });
-                  } catch (err) {
-                    setMessage({ ok: false, text: errorText(err, 'The test didn’t go through.') });
-                  }
-                }}
-              >
-                Test the team topic
-              </button>
-            )}
-          </div>
-        )}
-        <Result message={message} />
-      </form>
-    </SenderCard>
   );
 }
 

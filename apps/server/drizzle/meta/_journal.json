@@ -134,6 +134,13 @@
       "when": 1793562415649,
       "tag": "0018_inbox_basics",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793564244489,
+      "tag": "0019_drop_ntfy",
+      "breakpoints": true
     }
   ]
 }

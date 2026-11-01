@@ -269,7 +269,7 @@ describe.skipIf(!databaseUrl)('inbox basics', () => {
     expect(settings.body.mine.events).toMatchObject({
       handoff: ['browser', 'email'],
       unanswered: [],
-      snooze: ['browser', 'push'],
+      snooze: ['browser'],
     });
 
     expect(

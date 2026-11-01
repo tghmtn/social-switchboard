@@ -18,9 +18,9 @@ import {
 import { isGone, sendWebPush } from './webpush';
 
 // Alerts when a conversation needs someone. Switchboard's own notifications need no setup (each
-// person turns them on per device); admins set up the other senders (ntfy push, email over SMTP,
-// Twilio texts, plus an optional shared team topic); each teammate picks which events reach them
-// and how. Best effort, and never in the way of handling the message.
+// person turns them on per device); admins set up email (an SMTP server) and texts (Twilio); each
+// teammate picks which events reach them and how. Best effort, and never in the way of handling
+// the message.
 
 export type Notice = {
   workspaceId: string;
@@ -49,64 +49,25 @@ const PERSONAL: NoticeKind[] = ['assigned', 'snooze'];
 
 /**
  * What a teammate gets until they choose: everything as a notification (on the devices they
- * turned on) and by push, what needs someone by email too. Never texts, which cost money.
+ * turned on), what needs someone by email too. Never texts, which cost money.
  */
 export const DEFAULT_EVENTS: Record<NoticeKind, AlertChannel[]> = {
-  handoff: ['browser', 'push', 'email'],
-  assigned: ['browser', 'push', 'email'],
-  team: ['browser', 'push', 'email'],
-  unanswered: ['browser', 'push'],
-  paused: ['browser', 'push'],
-  snooze: ['browser', 'push'],
+  handoff: ['browser', 'email'],
+  assigned: ['browser', 'email'],
+  team: ['browser', 'email'],
+  unanswered: ['browser'],
+  paused: ['browser'],
+  snooze: ['browser'],
 };
 
 /** One alert per contact and kind in this window, so a chatty conversation doesn't buzz nonstop. */
 const QUIET_MS = 10 * 60_000;
 const lastSent = new Map<string, number>();
 
-/** Swappable for tests (ntfy and Twilio). */
+/** Swappable for tests (Twilio). */
 let http: typeof fetch = (...args) => fetch(...args);
 export function setNotifyHttp(impl: typeof fetch) {
   http = impl;
-}
-
-// ------------------------------------------------------------------ push (ntfy)
-
-/** Splits an ntfy topic URL into the server (for JSON publishing) and the topic. */
-export function ntfyTarget(url: string) {
-  const u = new URL(url);
-  const topic = u.pathname.split('/').filter(Boolean).pop();
-  if (!topic || !/^[\w-]{1,64}$/.test(topic)) return undefined;
-  return { server: `${u.origin}${u.pathname.slice(0, u.pathname.lastIndexOf('/'))}`, topic };
-}
-
-/** Publishes one message to an ntfy topic. Throws on failure (the test button shows why). */
-export async function publish(
-  target: { url: string; token?: string },
-  message: { title: string; text: string; click?: string; priority?: number; tags?: string[] },
-) {
-  const t = ntfyTarget(target.url);
-  if (!t) throw new Error('That isn’t an ntfy topic URL, like https://ntfy.sh/my-topic.');
-  const res = await http(t.server || target.url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(target.token ? { authorization: `Bearer ${target.token}` } : {}),
-    },
-    body: JSON.stringify({
-      topic: t.topic,
-      title: message.title,
-      message: message.text,
-      click: message.click,
-      priority: message.priority,
-      tags: message.tags,
-    }),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok)
-    throw new Error(
-      `ntfy answered ${res.status}${res.status === 403 ? ' (check the token)' : ''}.`,
-    );
 }
 
 // ------------------------------------------------------------------ email (SMTP)
@@ -186,8 +147,6 @@ type Deps = {
 export async function senders(db: Db, appSecret: string, workspaceId: string) {
   const [ws] = await db
     .select({
-      teamUrl: workspaces.notifyUrl,
-      teamTokenEnc: workspaces.notifyTokenEnc,
       smtp: workspaces.smtp,
       smtpPassEnc: workspaces.smtpPassEnc,
       twilio: workspaces.twilio,
@@ -197,7 +156,6 @@ export async function senders(db: Db, appSecret: string, workspaceId: string) {
     .where(eq(workspaces.id, workspaceId));
   const dec = (enc: string | null | undefined) => (enc ? decryptSecret(appSecret, enc) : undefined);
   return {
-    team: ws?.teamUrl ? { url: ws.teamUrl, token: dec(ws.teamTokenEnc) } : undefined,
     smtp: ws?.smtp ? { ...ws.smtp, password: dec(ws.smtpPassEnc) } : undefined,
     twilio:
       ws?.twilio && ws.twilioTokenEnc
@@ -206,14 +164,12 @@ export async function senders(db: Db, appSecret: string, workspaceId: string) {
   };
 }
 
-/** Each teammate's addresses and choices (defaults filled in). */
-export async function recipients(db: Db, appSecret: string, workspaceId: string) {
+/** Each teammate's devices, addresses and choices (defaults filled in). */
+export async function recipients(db: Db, workspaceId: string) {
   const rows = await db
     .select({
       userId: workspaceMembers.userId,
       accountEmail: users.email,
-      pushUrl: notificationPrefs.pushUrl,
-      pushTokenEnc: notificationPrefs.pushTokenEnc,
       email: notificationPrefs.email,
       phone: notificationPrefs.phone,
       events: notificationPrefs.events,
@@ -245,12 +201,6 @@ export async function recipients(db: Db, appSecret: string, workspaceId: string)
   return rows.map((r) => ({
     userId: r.userId,
     devices: devices.filter((d) => d.userId === r.userId),
-    push: r.pushUrl
-      ? {
-          url: r.pushUrl,
-          token: r.pushTokenEnc ? decryptSecret(appSecret, r.pushTokenEnc) : undefined,
-        }
-      : undefined,
     email: r.email || r.accountEmail,
     phone: r.phone ?? undefined,
     events: { ...DEFAULT_EVENTS, ...(r.events ?? {}) },
@@ -299,20 +249,9 @@ async function send(deps: Deps, n: Notice) {
 
   const from = await senders(deps.db, deps.appSecret, n.workspaceId);
   const jobs: { to: string; job: Promise<void> }[] = [];
-  const push = (target: { url: string; token?: string }) =>
-    publish(target, {
-      title,
-      text,
-      click: link,
-      priority: n.kind === 'handoff' || n.kind === 'assigned' ? 4 : 3,
-      tags: [n.kind === 'handoff' ? 'raising_hand' : 'speech_balloon'],
-    });
-
-  // The shared team topic hears everything but personal alerts.
   const personal = PERSONAL.includes(n.kind);
-  if (from.team && !personal) jobs.push({ to: 'team topic', job: push(from.team) });
 
-  for (const r of await recipients(deps.db, deps.appSecret, n.workspaceId)) {
+  for (const r of await recipients(deps.db, n.workspaceId)) {
     if (personal && r.userId !== n.userId) continue;
     const ways = r.events[n.kind] ?? [];
     if (ways.includes('browser'))
@@ -323,7 +262,6 @@ async function send(deps: Deps, n: Notice) {
             () => {},
           ),
         });
-    if (ways.includes('push') && r.push) jobs.push({ to: 'push', job: push(r.push) });
     if (ways.includes('email') && from.smtp && r.email)
       jobs.push({
         to: 'email',

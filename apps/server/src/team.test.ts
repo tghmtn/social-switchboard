@@ -7,9 +7,10 @@ import { createDb, runMigrations } from './db/client';
 import { type Mail, notifier, setMailer, setNotifyHttp } from './notify';
 import { defaultChannels } from './runtime/channels';
 import { receive } from './runtime/runtime';
+import { setWebPushSender } from './webpush';
 
-// The team (invite links, roles, what agents may change) and notifications: ntfy push, email over
-// SMTP and Twilio texts, routed by each teammate's choices.
+// The team (invite links, roles, what agents may change) and notifications: Switchboard's own on
+// people's devices, email over SMTP and Twilio texts, routed by each teammate's choices.
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -23,19 +24,22 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
   let pushes: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] =
     [];
   let mails: Mail[] = [];
+  let notifications: { endpoint: string; title: string; body: string }[] = [];
 
   beforeAll(async () => {
     await runMigrations(db, config.migrationsDir);
     app = await buildApp({ db, config }, false);
     setNotifyHttp(async (input, init) => {
-      const raw = String(init?.body);
       pushes.push({
         url: String(input),
         headers: init?.headers as Record<string, string>,
-        // ntfy takes JSON; Twilio takes a form.
-        body: raw.startsWith('{') ? JSON.parse(raw) : Object.fromEntries(new URLSearchParams(raw)),
+        // Twilio takes a form.
+        body: Object.fromEntries(new URLSearchParams(String(init?.body))),
       });
       return new Response('{}');
+    });
+    setWebPushSender(async (target, payload) => {
+      notifications.push({ endpoint: target.endpoint, ...JSON.parse(payload) });
     });
     setMailer(async (_smtp, mail) => {
       mails.push(mail);
@@ -48,6 +52,7 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
   beforeEach(async () => {
     pushes = [];
     mails = [];
+    notifications = [];
     await db.execute(sql`truncate workspaces, users cascade`);
     const res = await app.inject({
       method: 'POST',
@@ -102,9 +107,6 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     expect(me.body.workspaces[0]?.role).toBe('agent');
     expect((await call(agent, 'GET', '/api/inbox')).status).toBe(200);
     expect((await call(agent, 'PUT', '/api/instagram/settings', {})).status).toBe(403);
-    expect((await call(agent, 'PUT', '/api/settings/notifications', { url: null })).status).toBe(
-      403,
-    );
     expect(
       (
         await call(agent, 'PUT', '/api/settings/notifications/email', {
@@ -147,18 +149,22 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     expect((await call(owner, 'DELETE', `/api/team/members/${me}`)).status).toBe(409);
   });
 
-  it('pushes through ntfy: a test, and a message nothing answered', async () => {
-    const saved = await call(owner, 'PUT', '/api/settings/notifications', {
-      url: 'https://ntfy.example.test/sb-topic',
-      token: 'tk_secret',
-    });
-    expect(saved.body).toEqual({ url: 'https://ntfy.example.test/sb-topic', hasToken: true });
-    expect((await call(owner, 'POST', '/api/settings/notifications/test')).status).toBe(200);
-    expect(pushes[0]).toMatchObject({
-      url: 'https://ntfy.example.test',
-      headers: { authorization: 'Bearer tk_secret' },
-      body: { topic: 'sb-topic', title: 'Social Switchboard' },
-    });
+  it('notifies people’s devices about a message nothing answered', async () => {
+    expect(
+      (
+        await call(owner, 'POST', '/api/settings/notifications/devices', {
+          endpoint: 'https://web.push.apple.com/owner-phone',
+          keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) },
+        })
+      ).status,
+    ).toBe(201);
+    // ntfy is gone: its settings and channel are refused.
+    expect((await call(owner, 'PUT', '/api/settings/notifications', { url: null })).status).toBe(
+      404,
+    );
+    expect(
+      (await call(owner, 'POST', '/api/settings/notifications/test', { to: 'push' })).status,
+    ).toBe(400);
 
     const r = await db.execute<{ id: string }>(sql`select id from workspaces limit 1`);
     const runtime = {
@@ -173,17 +179,17 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
       profile: { username: 'fan_account' },
       text: 'Do you ship to Canada?',
     });
-    for (let i = 0; i < 50 && pushes.length < 2; i++)
+    for (let i = 0; i < 50 && notifications.length < 1; i++)
       await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(pushes[1]?.body).toMatchObject({
-      topic: 'sb-topic',
+    expect(notifications[0]).toMatchObject({
+      endpoint: 'https://web.push.apple.com/owner-phone',
       title: '@fan_account sent a message',
-      message: 'Do you ship to Canada?',
-      click: expect.stringMatching(/^https:\/\/social\.example\.test\/inbox\/[\w-]+$/),
+      body: 'Do you ship to Canada?',
+      url: expect.stringMatching(/^https:\/\/social\.example\.test\/inbox\/[\w-]+$/),
     });
   });
 
-  it('routes alerts by each teammate’s choices: their push topic, email over SMTP, texts', async () => {
+  it('routes alerts by each teammate’s choices: their devices, email over SMTP, texts', async () => {
     expect(
       (
         await call(owner, 'PUT', '/api/settings/notifications/email', {
@@ -209,9 +215,8 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     expect(
       (
         await call(owner, 'PUT', '/api/settings/notifications/mine', {
-          pushUrl: 'https://ntfy.example.test/todd-phone',
           phone: '+18015551234',
-          events: { handoff: ['push', 'email', 'sms'], unanswered: [] },
+          events: { handoff: ['browser', 'email', 'sms'], unanswered: [] },
         })
       ).status,
     ).toBe(200);
@@ -226,9 +231,9 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
       mine: {
         accountEmail: 'owner@example.test',
         events: {
-          handoff: ['push', 'email', 'sms'],
+          handoff: ['browser', 'email', 'sms'],
           unanswered: [],
-          assigned: ['browser', 'push', 'email'],
+          assigned: ['browser', 'email'],
         },
       },
     });
@@ -247,6 +252,10 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     expect(pushes.at(-1)).toMatchObject({
       url: `https://api.twilio.com/2010-04-01/Accounts/AC${'0'.repeat(32)}/Messages.json`,
       body: { To: '+18015551234', From: '+18015550000' },
+    });
+    await call(owner, 'POST', '/api/settings/notifications/devices', {
+      endpoint: 'https://web.push.apple.com/todd-phone',
+      keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) },
     });
     pushes = [];
     mails = [];
@@ -273,7 +282,11 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     });
     // Someone else's assignment reaches nobody here.
     notify({ workspaceId, contactId, channel: 'inbox', kind: 'assigned', userId: workspaceId });
-    for (let i = 0; i < 100 && (pushes.length < 2 || mails.length < 1); i++)
+    for (
+      let i = 0;
+      i < 100 && (pushes.length < 1 || mails.length < 1 || notifications.length < 1);
+      i++
+    )
       await new Promise((resolve) => setTimeout(resolve, 10));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(mails).toHaveLength(1);
@@ -283,13 +296,14 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
       text: expect.stringContaining('Wants a refund'),
     });
     expect(mails[0]?.html).toContain(`https://social.example.test/inbox/${contactId}`);
-    expect(pushes.map((p) => p.url).sort()).toEqual([
+    expect(pushes.map((p) => p.url)).toEqual([
       `https://api.twilio.com/2010-04-01/Accounts/AC${'0'.repeat(32)}/Messages.json`,
-      'https://ntfy.example.test',
     ]);
-    expect(pushes.find((p) => p.url === 'https://ntfy.example.test')?.body).toMatchObject({
-      topic: 'todd-phone',
-      title: '@mug_buyer needs a person',
-    });
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        endpoint: 'https://web.push.apple.com/todd-phone',
+        title: '@mug_buyer needs a person',
+      }),
+    ]);
   });
 });
