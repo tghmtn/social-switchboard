@@ -668,6 +668,8 @@ function defaultRule(subject: ConditionRule['subject']): ConditionRule {
       return { subject, op: 'in', days: [1, 2, 3, 4, 5] };
     case 'hour':
       return { subject, op: 'between', from: 9, to: 17 };
+    case 'follows':
+      return { subject, op: 'yes' };
   }
 }
 
@@ -692,6 +694,7 @@ function RuleEditor({
         <option value="channel">Channel</option>
         <option value="weekday">Day of week</option>
         <option value="hour">Time of day</option>
+        <option value="follows">Follows you</option>
       </Select>
       {rule.subject === 'tag' && (
         <div className="grid grid-cols-2 gap-2">
@@ -756,9 +759,27 @@ function RuleEditor({
             onChange={(e) => onChange({ ...rule, value: e.target.value })}
           >
             <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="webchat">Web chat</option>
             <option value="simulator">Simulator</option>
           </Select>
         </div>
+      )}
+      {rule.subject === 'follows' && (
+        <>
+          <Select
+            label="They"
+            value={rule.op}
+            onChange={(e) => onChange({ ...rule, op: e.target.value as 'yes' | 'no' })}
+          >
+            <option value="yes">follow you</option>
+            <option value="no">don’t follow you</option>
+          </Select>
+          <p className="text-[13px] text-muted">
+            On Instagram. Instagram only says once they’ve messaged you or tapped a button, so right
+            after a comment this reads “don’t follow” until they tap. Checked fresh every time.
+          </p>
+        </>
       )}
       {rule.subject === 'weekday' && (
         <DayPicker

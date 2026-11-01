@@ -70,6 +70,7 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
   const waiting = runs.filter((r) => r.status === 'waiting');
   const lastOutIndex = messages.findLastIndex((m) => m.direction === 'out');
   const choiceOpen = waiting.some((r) => r.waitKind === 'choice');
+  const follows = data?.contact?.followsUs ?? false;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run whenever a message arrives
   useEffect(() => {
@@ -114,6 +115,16 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
             title="Fire pending delays and reply timeouts now"
           >
             Skip waits
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${follows ? 'bg-surface-2 shadow-hard-sm' : ''}`}
+            aria-pressed={follows}
+            disabled={busy}
+            onClick={() => act('/simulator/follows', { follows: !follows })}
+            title="Whether this test contact follows you, for “follows you” checks"
+          >
+            Follows you: {follows ? 'yes' : 'no'}
           </button>
           <button
             type="button"

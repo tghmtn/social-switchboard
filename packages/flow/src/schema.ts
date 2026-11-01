@@ -84,6 +84,11 @@ export const conditionRule = z.discriminatedUnion('subject', [
     from: z.number().int().min(0).max(23),
     to: z.number().int().min(0).max(24),
   }),
+  /**
+   * Whether they follow the account. Instagram says only once they've messaged it or tapped a
+   * button; until then it counts as not following.
+   */
+  z.object({ subject: z.literal('follows'), op: z.enum(['yes', 'no']) }),
 ]);
 
 export const action = z.discriminatedUnion('type', [

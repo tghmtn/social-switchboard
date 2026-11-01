@@ -94,6 +94,7 @@ export type SimState = {
     id: string;
     tags: string[];
     fields: Record<string, string | number | boolean | null>;
+    followsUs: boolean;
     automationPausedAt: string | null;
   } | null;
   messages: SimMessage[];

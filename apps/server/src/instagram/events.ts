@@ -3,7 +3,8 @@ import type { Db } from '../db/client';
 import { instagramAccounts, webhookEvents } from '../db/schema';
 import { handlePage, type PagePayload } from '../facebook/events';
 import { type RuntimeDeps, receive, receiveComment } from '../runtime/runtime';
-import { newContactProfile, saveAvatar, saveProfile, staleProfile } from './profiles';
+import { userProfile } from './graph';
+import { newContactProfile, saveAvatar, saveProfile } from './profiles';
 import { decryptOptional } from './settings';
 import { personReplied, sentByUs, tooSoonToTell } from './takeover';
 
@@ -148,11 +149,9 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
       const ref = m.referral?.ref;
       if (text === undefined && payloadValue === undefined && ref === undefined && !m.message)
         continue;
-      // They've messaged us, so Instagram will share their profile (fetched at most weekly).
-      // Names go in before the flow runs, so even the first reply can greet them by name.
-      const profile = token
-        ? await staleProfile(deps.db, account.workspaceId, sender, token, host)
-        : undefined;
+      // They've messaged us, so Instagram will share their profile. It goes in before the flow
+      // runs, so even the first reply can greet them by name, and a follow check sees today's answer.
+      const profile = token ? await userProfile(token, sender, host) : undefined;
       const known = profile && (await saveProfile(deps.db, account.workspaceId, sender, profile));
       await receive(deps.runtime, {
         ...base,

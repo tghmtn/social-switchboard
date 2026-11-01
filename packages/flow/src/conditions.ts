@@ -49,6 +49,8 @@ export function evaluateRule(
         ? hour >= rule.from && hour < rule.to
         : hour >= rule.from || hour < rule.to;
     }
+    case 'follows':
+      return (contact.followsUs === true) === (rule.op === 'yes');
   }
 }
 

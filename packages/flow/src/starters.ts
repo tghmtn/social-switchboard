@@ -10,6 +10,9 @@ export type Starter = {
   trigger?: TriggerConfig;
 };
 
+/** Stands in for the account's Instagram username in a starter; filled in when the flow is made. */
+export const HANDLE_PLACEHOLDER = 'your_handle';
+
 const at = (x: number, y = 0) => ({ x: x * 320, y: y * 220 });
 const edge = (source: string, sourceHandle: string, target: string) => ({
   id: `${source}-${sourceHandle}-${target}`,
@@ -132,6 +135,120 @@ export const STARTERS: Starter[] = [
         edge('ask_email', 'answered', 'mark_lead'),
         edge('ask_email', 'failed', 'no_email'),
         edge('mark_lead', 'next', 'on_the_list'),
+      ],
+    },
+  },
+  {
+    key: 'follow_first',
+    name: 'Follow first',
+    description:
+      'Someone comments a keyword. Check they follow you before the link goes out, with a nudge to follow if they don’t yet.',
+    trigger: {
+      type: 'comment',
+      keywords: ['GUIDE'],
+      match: 'contains',
+      mediaIds: [],
+      publicReplies: ['Sent you a DM 💌'],
+    },
+    graph: {
+      nodes: [
+        { id: 'start', type: 'start', position: at(0) },
+        {
+          // After a comment Instagram doesn't say yet whether they follow (that takes a message or
+          // a tap), so a commenter lands on the nudge, and their tap is the real check.
+          id: 'check',
+          type: 'condition',
+          position: at(1),
+          data: {
+            cases: [{ id: 'follows', match: 'all', rules: [{ subject: 'follows', op: 'yes' }] }],
+          },
+        },
+        {
+          id: 'ask_follow',
+          type: 'message',
+          position: at(2, 1),
+          data: {
+            parts: [
+              {
+                type: 'text',
+                text: 'This one’s for my followers 💛 Make sure you’re following me, then tap “I’m following” and I’ll send it right over.',
+              },
+            ],
+            buttons: [
+              {
+                id: 'btn_follow',
+                kind: 'url',
+                label: 'Follow me',
+                url: `https://www.instagram.com/${HANDLE_PLACEHOLDER}`,
+              },
+              { id: 'btn_following', kind: 'flow', label: 'I’m following' },
+            ],
+          },
+        },
+        {
+          id: 'recheck',
+          type: 'condition',
+          position: at(3, 1),
+          data: {
+            cases: [{ id: 'follows', match: 'all', rules: [{ subject: 'follows', op: 'yes' }] }],
+          },
+        },
+        {
+          id: 'not_yet',
+          type: 'message',
+          position: at(4, 2),
+          data: {
+            parts: [
+              {
+                type: 'text',
+                text: 'Hmm, I don’t see the follow yet 👀 Tap “Follow me”, follow, then tap “I’m following” again.',
+              },
+            ],
+            buttons: [
+              {
+                id: 'btn_follow_again',
+                kind: 'url',
+                label: 'Follow me',
+                url: `https://www.instagram.com/${HANDLE_PLACEHOLDER}`,
+              },
+              { id: 'btn_following_again', kind: 'flow', label: 'I’m following' },
+            ],
+          },
+        },
+        {
+          id: 'send',
+          type: 'message',
+          position: at(4),
+          data: {
+            parts: [
+              { type: 'text', text: 'Thanks for following! 💛 Here’s the guide you asked for 👇' },
+            ],
+            buttons: [
+              {
+                id: 'btn_guide',
+                kind: 'url',
+                label: 'Get the guide',
+                url: 'https://example.com/guide',
+              },
+            ],
+          },
+        },
+        {
+          id: 'tag',
+          type: 'action',
+          position: at(5),
+          data: { actions: [{ type: 'add_tag', tag: 'guide-sent' }] },
+        },
+      ],
+      edges: [
+        edge('start', 'next', 'check'),
+        edge('check', 'follows', 'send'),
+        edge('check', 'else', 'ask_follow'),
+        edge('ask_follow', 'btn_following', 'recheck'),
+        edge('recheck', 'follows', 'send'),
+        edge('recheck', 'else', 'not_yet'),
+        edge('not_yet', 'btn_following_again', 'recheck'),
+        edge('send', 'next', 'tag'),
       ],
     },
   },

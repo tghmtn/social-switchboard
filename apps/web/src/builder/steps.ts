@@ -191,6 +191,8 @@ export function ruleText(r: ConditionRule): string {
       return `on ${r.days.map((d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join(', ')}`;
     case 'hour':
       return `between ${r.from}:00 and ${r.to}:00`;
+    case 'follows':
+      return r.op === 'yes' ? 'follows you' : 'doesn’t follow you';
   }
 }
 

@@ -125,6 +125,8 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   let setups = 0;
   /** Ids Instagram gives our next sends (otherwise made up). */
   let nextMids: string[] = [];
+  /** Whether the fan follows the account, as Instagram's profile says. */
+  let fanFollows = true;
   /** Sends wait on this, to hold a delivery mid-way. */
   let hold: Promise<void> = Promise.resolve();
 
@@ -201,7 +203,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
         name: 'Fan Person',
         profile_pic: 'https://cdn.example.test/fan.jpg',
         follower_count: 12,
-        is_user_follow_business: true,
+        is_user_follow_business: fanFollows,
         is_business_follow_user: false,
       });
     return json({ error: { message: `unexpected ${path}`, code: 100 } }, 400);
@@ -265,6 +267,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     messagesOff = false;
     hold = Promise.resolve();
     nextMids = [];
+    fanFollows = true;
     setEchoGraceMs(30_000);
     await db.execute(sql`truncate workspaces, users, webhook_events cascade`);
     // Each test signs up a fresh owner; a new LAN address per test keeps under setup's rate limit.
@@ -704,11 +707,16 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(avatar.headers['content-type']).toBe('image/jpeg');
     expect(avatar.body).toBe('fake-jpeg');
 
-    // Within a week, another message doesn't ask Instagram again.
+    // Every message reads the profile again (a follow can change any minute), but the picture
+    // is copied at most once a week.
     calls = [];
+    fanFollows = false;
     await webhook(dm('in-2', 'hello again'));
     await settled();
-    expect(calls.some((c) => c.url.pathname.endsWith('/fan-igsid'))).toBe(false);
+    expect(calls.some((c) => c.url.pathname.endsWith('/fan-igsid'))).toBe(true);
+    expect(calls.some((c) => c.url.host === 'cdn.example.test')).toBe(false);
+    const again = await call<{ identities: object[] }>('GET', `/api/contacts/${fan?.id}`);
+    expect(again.body.identities[0]).toMatchObject({ followsUs: false });
   });
 
   it('pauses automation when someone replies from the Instagram app', async () => {
@@ -1003,6 +1011,90 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     });
     await settled();
     expect(sends()).toEqual([]);
+  });
+
+  it('checks they follow before sending, asking again on each tap', async () => {
+    await connect();
+    const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
+      name: 'Follow first',
+      starter: 'follow_first',
+    });
+    await call('POST', `/api/flows/${body.flow.id}/publish`, {});
+    calls = [];
+    fanFollows = false;
+
+    type Card = {
+      text: string;
+      buttons: { type: string; title: string; url?: string; payload?: string }[];
+    };
+    const cardOf = (n: number) =>
+      (sends()[n]?.body as { message: { attachment: { payload: Card } } } | undefined)?.message
+        .attachment.payload;
+    const tap = (mid: string, button?: { title: string; payload?: string }) => ({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ID,
+          messaging: [
+            {
+              sender: { id: 'fan-igsid' },
+              recipient: { id: IG_ID },
+              postback: { mid, title: button?.title, payload: button?.payload },
+            },
+          ],
+        },
+      ],
+    });
+
+    // The template's own comment trigger: any post, "guide" anywhere in the comment.
+    await webhook({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ID,
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: 'c1',
+                text: 'Guide please!',
+                from: { id: 'fan-igsid', username: 'fan_account' },
+                media: { id: 'm1' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    await settled();
+    // Instagram won't say after a comment, so the private reply asks them to follow, with a link
+    // to the connected account's own profile.
+    expect(sends()[0]?.body).toMatchObject({ recipient: { comment_id: 'c1' } });
+    const ask = cardOf(0);
+    expect(ask?.text).toMatch(/Make sure you’re following me/);
+    expect(ask?.buttons.map((b) => [b.type, b.title, b.url])).toEqual([
+      ['web_url', 'Follow me', 'https://www.instagram.com/tgtest'],
+      ['postback', 'I’m following', undefined],
+    ]);
+    expect(calls.find((c) => c.url.pathname.endsWith('/c1/replies'))?.body).toEqual({
+      message: 'Sent you a DM 💌',
+    });
+
+    // "I'm following" before they have: Instagram is asked, and says no.
+    await webhook(tap('in-1', ask?.buttons[1]));
+    await settled();
+    const notYet = cardOf(1);
+    expect(notYet?.text).toMatch(/I don’t see the follow yet/);
+
+    // They follow, then tap again: the check is fresh, and the link goes out.
+    fanFollows = true;
+    await webhook(tap('in-2', notYet?.buttons[1]));
+    await settled();
+    expect(sends()[2]?.body).toMatchObject({ recipient: { id: 'fan-igsid' } });
+    expect(cardOf(2)?.text).toMatch(/Thanks for following/);
+    expect(cardOf(2)?.buttons.map((b) => b.title)).toEqual(['Get the guide']);
+    const contacts = await call<{ contacts: { tags: string[] }[] }>('GET', '/api/contacts');
+    expect(contacts.body.contacts[0]?.tags).toEqual(['guide-sent']);
   });
 
   it('holds a second message after a comment until the person writes back', async () => {

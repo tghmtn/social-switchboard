@@ -2,12 +2,14 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { contactAvatars, contactIdentities, contacts } from '../db/schema';
 import type { Profile } from '../runtime/contacts';
-import { downloadImage, type Host, type UserProfile, userProfile } from './graph';
+import { downloadImage, type UserProfile } from './graph';
 
 // Someone's Instagram profile (name, picture, follows) onto their identity and contact. Instagram
-// shares it only after they've messaged the account, so it's fetched then, at most once a week.
+// shares it only after they've messaged the account, so it's read then, on every message or tap:
+// whether they follow can change from one minute to the next, and a flow may be checking. The
+// picture is copied at most once a week.
 
-const REFRESH_AFTER = 7 * 24 * 3_600_000;
+const PICTURE_REFRESH = 7 * 24 * 3_600_000;
 
 /** "Oliver Gharring" → Oliver / Gharring. One word is a first name. */
 export function splitName(name?: string): { firstName?: string; lastName?: string } {
@@ -23,25 +25,9 @@ const identity = (workspaceId: string, igsid: string) =>
     eq(contactIdentities.externalId, igsid),
   );
 
-/** Their profile, when ours is missing or a week old. Undefined when it's fresh or unavailable. */
-export async function staleProfile(
-  db: Db,
-  workspaceId: string,
-  igsid: string,
-  token: string,
-  host: Host,
-): Promise<UserProfile | undefined> {
-  const [known] = await db
-    .select({ at: contactIdentities.profileSyncedAt })
-    .from(contactIdentities)
-    .where(identity(workspaceId, igsid));
-  if (known?.at && Date.now() - known.at.getTime() < REFRESH_AFTER) return undefined;
-  return userProfile(token, igsid, host);
-}
-
 /** What a brand-new contact starts with. */
 export const newContactProfile = (p?: UserProfile): Profile | undefined =>
-  p && { username: p.username, ...splitName(p.name) };
+  p && { username: p.username, ...splitName(p.name), followsUs: p.is_user_follow_business };
 
 /**
  * Saves the profile onto their identity, and their name onto the contact when it has none yet
@@ -77,7 +63,10 @@ export async function saveProfile(db: Db, workspaceId: string, igsid: string, p:
   return true;
 }
 
-/** Keeps a copy of their picture (Instagram's links expire after a few days); none removes it. */
+/**
+ * Keeps a copy of their picture (Instagram's links expire after a few days), refreshed weekly;
+ * none removes it.
+ */
 export async function saveAvatar(db: Db, workspaceId: string, igsid: string, url?: string) {
   const [known] = await db
     .select({ contactId: contactIdentities.contactId })
@@ -88,6 +77,11 @@ export async function saveAvatar(db: Db, workspaceId: string, igsid: string, url
     await db.delete(contactAvatars).where(eq(contactAvatars.contactId, known.contactId));
     return;
   }
+  const [kept] = await db
+    .select({ at: contactAvatars.updatedAt })
+    .from(contactAvatars)
+    .where(eq(contactAvatars.contactId, known.contactId));
+  if (kept && Date.now() - kept.at.getTime() < PICTURE_REFRESH) return;
   const image = await downloadImage(url);
   if (!image) return; // keep the one we have
   const values = { contentType: image.contentType, data: image.data, updatedAt: new Date() };

@@ -15,6 +15,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 type SimState = {
   contact: {
     id: string;
+    followsUs: boolean;
     tags: string[];
     fields: Record<string, unknown>;
     automationPausedAt: string | null;
@@ -166,6 +167,34 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
     expect(row).toContain(
       ',Ada,Lovelace,ada@example.test,,,lead; workshop-interest,simulator,true,,',
     );
+  });
+
+  it('checks “follows you” against the test contact’s switch', async () => {
+    const flowId = await createFlow('Follow first', 'follow_first');
+    expect((await call('POST', `/api/flows/${flowId}/publish`)).status).toBe(200);
+
+    // A comment: nobody has said they follow, so the private reply asks them to.
+    let s = (await call<SimState>('POST', '/api/simulator/comment', { text: 'guide please' })).body;
+    // (The public "Sent you a DM" under the comment comes after it.)
+    const ask = s.messages
+      .map((m) => m.content)
+      .find((c): c is OutboundContent => c.kind === 'out' && Boolean(c.privateReplyTo));
+    if (!ask) throw new Error('no private reply');
+    expect(ask.message.parts[0]).toMatchObject({ text: expect.stringMatching(/following me/) });
+    // No Instagram account connected, so the profile link keeps its placeholder to edit.
+    expect(ask.message.buttons[0]).toMatchObject({ url: 'https://www.instagram.com/your_handle' });
+    expect(s.contact?.followsUs).toBe(false);
+
+    s = (await call<SimState>('POST', '/api/simulator/follows', { follows: true })).body;
+    expect(s.contact?.followsUs).toBe(true);
+    s = (
+      await call<SimState>('POST', '/api/simulator/tap', {
+        payload: ask.payloads.btn_following,
+        label: 'I’m following',
+      })
+    ).body;
+    expect(outText(s).at(-1)).toMatch(/Thanks for following/);
+    expect(s.contact?.tags).toEqual(['guide-sent']);
   });
 
   it('tests a draft with a delay, then fast-forwards it', async () => {

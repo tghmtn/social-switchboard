@@ -56,6 +56,8 @@ export type Profile = {
   lastName?: string;
   username?: string;
   accountRef?: string;
+  /** Whether they follow the account, when the channel says (Instagram, once they've messaged). */
+  followsUs?: boolean;
 };
 
 /** Finds the contact behind a channel identity, creating both on first contact. */
@@ -93,6 +95,7 @@ export async function findOrCreateContact(
     contactId: created.id,
     username: profile.username,
     accountRef: profile.accountRef,
+    followsUs: profile.followsUs,
   });
   await recordEvent(tx, workspaceId, created.id, 'contact_created', { channel });
   return { contactId: created.id, isNew: true };
@@ -111,10 +114,18 @@ export async function loadSnapshot(
     .innerJoin(tags, eq(tags.id, contactTags.tagId))
     .where(eq(contactTags.contactId, contactId))
     .orderBy(contactTags.createdAt);
+  // Follow status belongs to their identity on the channel the conversation is on.
+  const [identity] = await tx
+    .select({ followsUs: contactIdentities.followsUs })
+    .from(contactIdentities)
+    .where(and(eq(contactIdentities.contactId, contactId), eq(contactIdentities.channel, channel)))
+    .orderBy(sql`${contactIdentities.profileSyncedAt} desc nulls last`)
+    .limit(1);
   return {
     id: row.id,
     channel,
     tags: tagRows.map((t) => t.name),
+    followsUs: identity?.followsUs ?? null,
     fields: {
       ...row.customFields,
       first_name: row.firstName,

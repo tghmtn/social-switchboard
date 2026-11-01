@@ -644,3 +644,41 @@ describe('the lead magnet starter (WORKSHOP scenario)', () => {
     ).toEqual(['https://example.com/register?email=ada%40example.com']);
   });
 });
+
+describe('the follow first starter', () => {
+  const starter = STARTERS.find((s) => s.key === 'follow_first');
+  const g = graph(starter?.graph ?? { nodes: [], edges: [] });
+  const as = (followsUs: boolean | null) => ctx({ contact: contact({ followsUs }) });
+  const buttons = (effects: Effect[]) =>
+    effects.flatMap((x) => (x.type === 'send' ? x.message.buttons.map((b) => b.label) : []));
+
+  it('sends a follower the link straight away', () => {
+    const r = advance(g, null, { type: 'start' }, as(true));
+    expect(sends(r.effects)).toEqual([
+      'Thanks for following! 💛 Here’s the guide you asked for 👇',
+    ]);
+    expect(r.contact.tags).toEqual(['guide-sent']);
+  });
+
+  it('asks a commenter to follow, since Instagram hasn’t said yet', () => {
+    const r = advance(g, null, { type: 'start' }, as(null));
+    expect(sends(r.effects)[0]).toMatch(/Make sure you’re following me/);
+    expect(buttons(r.effects)).toEqual(['Follow me', 'I’m following']);
+    expect(r.state.status).toBe('completed');
+  });
+
+  it('checks again on each “I’m following” tap', () => {
+    const tap = { type: 'start' as const, from: { nodeId: 'ask_follow', handle: 'btn_following' } };
+    const notYet = advance(g, null, tap, as(false));
+    expect(sends(notYet.effects)[0]).toMatch(/I don’t see the follow yet/);
+    expect(notYet.contact.tags).toEqual([]);
+
+    const again = {
+      type: 'start' as const,
+      from: { nodeId: 'not_yet', handle: 'btn_following_again' },
+    };
+    const followed = advance(g, null, again, as(true));
+    expect(sends(followed.effects)[0]).toMatch(/Thanks for following/);
+    expect(followed.contact.tags).toEqual(['guide-sent']);
+  });
+});

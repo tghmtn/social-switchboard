@@ -7,6 +7,7 @@ import { Page } from './Shell';
 
 const STARTER_ICON: Record<string, SquareIconName> = {
   lead_magnet: 'sparkle',
+  follow_first: 'check',
   welcome: 'chat',
   keyword_reply: 'flow',
   blank: 'board',

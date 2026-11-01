@@ -379,3 +379,5 @@ From the brainstorm. Used as the acceptance test from Phase 1 on.
 10. Compare engagement, leads and registrations.
 
 Since 2026-11-01 the Lead magnet starter sends the worksheet in the first reply, with no question before it, and puts a "Send me more" button beside the link. The tap is what Instagram counts as the person messaging: it brings in their name and photo (a comment alone never does), opens the 24-hour window, and leads on to the email question (steps 4–6 after the resource instead of before it).
+
+The **Follow first** starter (2026-11-01, asked for by Brittany) gates the resource on a follow. Conditions gained a **Follows you** check, read from Instagram's `is_user_follow_business`. Instagram shares it only after a message or tap, so a commenter's private reply asks them to follow and tap "I'm following"; each tap reads the profile fresh. Profiles are now read on every inbound message or tap (the picture is still copied at most weekly), and Test chat has a "Follows you" switch.

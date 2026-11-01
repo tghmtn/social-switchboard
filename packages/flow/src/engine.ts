@@ -18,6 +18,8 @@ export type ContactSnapshot = {
   channel: string;
   tags: string[];
   fields: Record<string, FieldValue>;
+  /** Whether they follow the account they're talking to; null or absent when the channel hasn't said. */
+  followsUs?: boolean | null;
 };
 
 export type RunWait =

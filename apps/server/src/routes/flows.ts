@@ -1,6 +1,7 @@
 import {
   type FlowIssue,
   flowGraph,
+  HANDLE_PLACEHOLDER,
   STARTERS,
   triggerConfig,
   validateFlow,
@@ -10,7 +11,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
 import type { Db, Tx } from '../db/client';
-import { flows, flowVersions, runs, triggers } from '../db/schema';
+import { flows, flowVersions, instagramAccounts, runs, triggers } from '../db/schema';
 import { notFound, requireWorkspace, who } from './guard';
 
 const idParam = z.object({ id: z.uuid() });
@@ -116,7 +117,19 @@ export const flowRoutes =
         })
         .parse(req.body);
       const starter = STARTERS.find((s) => s.key === body.starter) ?? STARTERS.at(-1);
-      const graph = flowGraph.parse(starter?.graph);
+      // A starter's links to "your" Instagram profile point at the connected account.
+      const [account] = await db
+        .select({ username: instagramAccounts.username })
+        .from(instagramAccounts)
+        .where(eq(instagramAccounts.workspaceId, workspace.id))
+        .orderBy(instagramAccounts.connectedAt)
+        .limit(1);
+      const handle = account?.username;
+      const graph = flowGraph.parse(
+        handle
+          ? JSON.parse(JSON.stringify(starter?.graph).replaceAll(HANDLE_PLACEHOLDER, handle))
+          : starter?.graph,
+      );
       const flow = await db.transaction(async (tx) => {
         const [created] = await tx
           .insert(flows)

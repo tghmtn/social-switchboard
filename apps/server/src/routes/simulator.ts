@@ -84,6 +84,7 @@ export const simulatorRoutes =
           id: contactId,
           tags: snapshot.tags,
           fields: snapshot.fields,
+          followsUs: snapshot.followsUs === true,
           automationPausedAt: row?.pausedAt ?? null,
         },
         messages: transcript,
@@ -237,6 +238,26 @@ export const simulatorRoutes =
           .update(contacts)
           .set({ automationPausedAt: null, automationResumeAt: null })
           .where(eq(contacts.id, contactId));
+      return state(workspace.id, user);
+    });
+
+    /** Whether the test contact follows you, for trying "follows you" checks. */
+    app.post('/simulator/follows', async (req) => {
+      const { user, workspace } = who(req);
+      const { follows } = z.object({ follows: z.boolean() }).parse(req.body);
+      await db.transaction(async (tx) => {
+        await findOrCreateContact(tx, workspace.id, CHANNEL, externalIdFor(user), profileFor(user));
+        await tx
+          .update(contactIdentities)
+          .set({ followsUs: follows })
+          .where(
+            and(
+              eq(contactIdentities.workspaceId, workspace.id),
+              eq(contactIdentities.channel, CHANNEL),
+              eq(contactIdentities.externalId, externalIdFor(user)),
+            ),
+          );
+      });
       return state(workspace.id, user);
     });
 
