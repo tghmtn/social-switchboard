@@ -6,6 +6,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
 import { encryptSecret, signToken, verifyToken } from '../crypto';
+import type { Db } from '../db/client';
 import { instagramAccounts, metaApps, webhookEvents } from '../db/schema';
 import { processWebhookEvents } from '../instagram/events';
 import * as graph from '../instagram/graph';
@@ -36,6 +37,62 @@ function signatureMatches(raw: string, header: string | undefined, secret: strin
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+type NewAccount = {
+  igUserId: string;
+  username?: string;
+  name?: string;
+  profilePictureUrl?: string;
+  accountType?: string;
+  apiHost: graph.Host;
+  token: string;
+  expiresIn?: number;
+};
+
+/**
+ * Saves (or refreshes) one connected account, then asks Meta to send us its events. Returns what
+ * to tell the person instead when the account belongs to another workspace.
+ */
+async function saveAccount(db: Db, appSecret: string, workspaceId: string, a: NewAccount) {
+  const [owner] = await db
+    .select({ ws: instagramAccounts.workspaceId })
+    .from(instagramAccounts)
+    .where(eq(instagramAccounts.igUserId, a.igUserId));
+  if (owner && owner.ws !== workspaceId)
+    return `@${a.username ?? a.igUserId} is already connected to another workspace.`;
+  const values = {
+    workspaceId,
+    igUserId: a.igUserId,
+    username: a.username ?? null,
+    name: a.name ?? null,
+    profilePictureUrl: a.profilePictureUrl ?? null,
+    accountType: a.accountType ?? null,
+    apiHost: a.apiHost,
+    accessTokenEnc: encryptSecret(appSecret, a.token),
+    tokenExpiresAt: a.expiresIn ? new Date(Date.now() + a.expiresIn * 1000) : null,
+    status: 'connected',
+    statusDetail: null,
+    updatedAt: new Date(),
+  };
+  await db
+    .insert(instagramAccounts)
+    .values(values)
+    .onConflictDoUpdate({ target: instagramAccounts.igUserId, set: values });
+  try {
+    await graph.subscribe(a.igUserId, a.token, a.apiHost);
+  } catch (err) {
+    await db
+      .update(instagramAccounts)
+      .set({
+        statusDetail: `Connected, but subscribing to its events failed: ${err instanceof graph.MetaError ? err.friendly : String(err)}`,
+      })
+      .where(eq(instagramAccounts.igUserId, a.igUserId));
+  }
+  return undefined;
+}
+
+/** How long a Unified login token waits for its account ID before Connect has to start over. */
+const PENDING_MAX_AGE = 60 * 60 * 1000;
 
 /** Routes Meta calls directly (no session): webhook, deauthorize, and the login callback. */
 export const instagramPublicRoutes =
@@ -188,54 +245,7 @@ export const instagramPublicRoutes =
 
       const settings = await metaAppFor(db, state.ws);
       const redirect = metaUrls(config.publicUrl).oauthRedirect;
-
-      /** Saves (or refreshes) one connected account, then asks Meta to send us its events. */
-      const saveAccount = async (a: {
-        igUserId: string;
-        username?: string;
-        name?: string;
-        profilePictureUrl?: string;
-        accountType?: string;
-        apiHost: graph.Host;
-        token: string;
-        expiresIn?: number;
-      }) => {
-        const [owner] = await db
-          .select({ ws: instagramAccounts.workspaceId })
-          .from(instagramAccounts)
-          .where(eq(instagramAccounts.igUserId, a.igUserId));
-        if (owner && owner.ws !== state.ws)
-          return `@${a.username ?? a.igUserId} is already connected to another workspace.`;
-        const values = {
-          workspaceId: state.ws,
-          igUserId: a.igUserId,
-          username: a.username ?? null,
-          name: a.name ?? null,
-          profilePictureUrl: a.profilePictureUrl ?? null,
-          accountType: a.accountType ?? null,
-          apiHost: a.apiHost,
-          accessTokenEnc: encryptSecret(config.appSecret, a.token),
-          tokenExpiresAt: a.expiresIn ? new Date(Date.now() + a.expiresIn * 1000) : null,
-          status: 'connected',
-          statusDetail: null,
-          updatedAt: new Date(),
-        };
-        await db
-          .insert(instagramAccounts)
-          .values(values)
-          .onConflictDoUpdate({ target: instagramAccounts.igUserId, set: values });
-        try {
-          await graph.subscribe(a.igUserId, a.token, a.apiHost);
-        } catch (err) {
-          await db
-            .update(instagramAccounts)
-            .set({
-              statusDetail: `Connected, but subscribing to its events failed: ${err instanceof graph.MetaError ? err.friendly : String(err)}`,
-            })
-            .where(eq(instagramAccounts.igUserId, a.igUserId));
-        }
-        return undefined;
-      };
+      const save = (a: NewAccount) => saveAccount(db, config.appSecret, state.ws, a);
 
       try {
         // Unified login (newer Meta apps): a business system-user token for the accounts the person shared.
@@ -256,15 +266,23 @@ export const instagramPublicRoutes =
             { notes, found: accounts.length },
             'unified login: looked for Instagram accounts',
           );
-          if (accounts.length === 0) {
-            return back({
-              error:
-                'Meta didn’t share an Instagram account. While logging in, choose your business portfolio and your Instagram account.',
-            });
-          }
+          // Meta often doesn't say which account was shared (its token lists none without
+          // business_management), so keep the token and ask for the ID Meta shows the owner.
+          await db
+            .update(metaApps)
+            .set(
+              accounts.length === 0
+                ? {
+                    pendingTokenEnc: encryptSecret(config.appSecret, token.accessToken),
+                    pendingTokenAt: new Date(),
+                  }
+                : { pendingTokenEnc: null, pendingTokenAt: null },
+            )
+            .where(eq(metaApps.workspaceId, state.ws));
+          if (accounts.length === 0) return back({ account: 'needed' });
           const problems: string[] = [];
           for (const a of accounts) {
-            const problem = await saveAccount({
+            const problem = await save({
               igUserId: a.id,
               username: a.username,
               name: a.name,
@@ -296,7 +314,7 @@ export const instagramPublicRoutes =
             error: `@${profile.username ?? 'that account'} is a personal account. Switch it to Creator or Business (step 1) and try again.`,
           });
         }
-        const problem = await saveAccount({
+        const problem = await save({
           igUserId: String(profile.user_id ?? short.userId),
           username: profile.username,
           name: profile.name,
@@ -363,6 +381,12 @@ export const instagramRoutes =
         instagramAppId: s.instagramAppId,
         hasInstagramAppSecret: Boolean(s.instagramAppSecretEnc),
         hasFacebookAppSecret: Boolean(s.facebookAppSecretEnc),
+        /** Unified login finished but Meta didn't say which account: its ID finishes connecting. */
+        accountIdNeeded: Boolean(
+          s.pendingTokenEnc &&
+            s.pendingTokenAt &&
+            Date.now() - s.pendingTokenAt.getTime() < PENDING_MAX_AGE,
+        ),
         webhookVerifyToken: s.webhookVerifyToken,
         webhookVerifiedAt: s.webhookVerifiedAt,
         lastWebhookAt: s.lastWebhookAt,
@@ -447,6 +471,45 @@ export const instagramRoutes =
       return reply.redirect(
         `/channels?${new URLSearchParams({ error: 'Paste your Login URL and Meta app secret first.' })}`,
       );
+    });
+
+    /** Finishes a Unified login with the account ID from Meta's Connected apps screen. */
+    app.post('/instagram/accounts/by-id', async (req, reply) => {
+      const { workspace } = who(req);
+      const { igUserId } = z
+        .object({
+          igUserId: z
+            .string()
+            .trim()
+            .regex(/^\d{5,30}$/, 'The account ID is a long number, like 17841400000000000.'),
+        })
+        .parse(req.body);
+      const s = await metaAppFor(db, workspace.id);
+      const fresh = s.pendingTokenAt && Date.now() - s.pendingTokenAt.getTime() < PENDING_MAX_AGE;
+      const token = fresh ? decryptOptional(config.appSecret, s.pendingTokenEnc) : undefined;
+      if (!token) return reply.code(409).send({ error: 'login_needed' });
+      let account: graph.AssignedAccount;
+      try {
+        // Only works for an account the login shared, so a wrong or someone else's ID fails here.
+        account = await graph.instagramAccount(token, igUserId);
+      } catch (err) {
+        req.log.info({ err: String(err) }, 'instagram account by id: not shared');
+        return reply.code(400).send({ error: 'not_shared' });
+      }
+      const problem = await saveAccount(db, config.appSecret, workspace.id, {
+        igUserId: account.id,
+        username: account.username,
+        name: account.name,
+        profilePictureUrl: account.profile_picture_url,
+        apiHost: 'facebook',
+        token,
+      });
+      if (problem) return reply.code(409).send({ error: 'other_workspace' });
+      await db
+        .update(metaApps)
+        .set({ pendingTokenEnc: null, pendingTokenAt: null })
+        .where(eq(metaApps.workspaceId, workspace.id));
+      return status(workspace.id);
     });
 
     app.delete('/instagram/accounts/:id', async (req, reply) => {

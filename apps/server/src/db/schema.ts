@@ -418,6 +418,12 @@ export const metaApps = pgTable('meta_apps', {
   instagramAppSecretEnc: text('instagram_app_secret_enc'),
   /** The Meta app secret (App settings → Basic). Signs webhooks; Unified login's token exchange uses it. */
   facebookAppSecretEnc: text('facebook_app_secret_enc'),
+  /**
+   * Unified login when Meta doesn't say which Instagram account was shared: the token, kept until
+   * the owner pastes the account ID from Meta's Connected apps screen. Encrypted.
+   */
+  pendingTokenEnc: text('pending_token_enc'),
+  pendingTokenAt: timestamp('pending_token_at', { withTimezone: true }),
   /** Random string Meta echoes back when it verifies the webhook URL. */
   webhookVerifyToken: text('webhook_verify_token').notNull(),
   webhookVerifiedAt: timestamp('webhook_verified_at', { withTimezone: true }),

@@ -177,6 +177,8 @@ export type InstagramSettings = {
   instagramAppId: string | null;
   hasInstagramAppSecret: boolean;
   hasFacebookAppSecret: boolean;
+  /** Unified login finished but Meta didn't say which account: its ID finishes connecting. */
+  accountIdNeeded: boolean;
   webhookVerifyToken: string;
   webhookVerifiedAt: string | null;
   lastWebhookAt: string | null;

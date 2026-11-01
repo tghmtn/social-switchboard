@@ -75,6 +75,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   let cookies: Record<string, string> = {};
   let calls: Call[] = [];
   let assignedEmpty = false;
+  let targetsEmpty = false;
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -96,7 +97,13 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
         });
       if (path === '/debug_token')
         return json({
-          data: { granular_scopes: [{ scope: 'instagram_basic', target_ids: [IG_ID] }] },
+          data: {
+            granular_scopes: [
+              targetsEmpty
+                ? { scope: 'instagram_basic' }
+                : { scope: 'instagram_basic', target_ids: [IG_ID] },
+            ],
+          },
         });
       if (path === `/${IG_ID}`) return json({ id: IG_ID, username: 'tgfromdebug' });
       if (path === `/${IG_ID}/media`)
@@ -170,6 +177,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   beforeEach(async () => {
     calls = [];
     assignedEmpty = false;
+    targetsEmpty = false;
     await db.execute(sql`truncate workspaces, users, webhook_events cascade`);
     const res = await app.inject({
       method: 'POST',
@@ -365,6 +373,49 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(String(back.headers.location)).toBe('/channels?connected=tgfromdebug');
     const debug = calls.find((c) => c.url.pathname.endsWith('/debug_token'));
     expect(debug?.url.searchParams.get('access_token')).toBe(`1076000000000001|${FB_SECRET}`);
+  });
+
+  it('asks for the account ID when Meta doesn’t say which account was shared', async () => {
+    assignedEmpty = true;
+    targetsEmpty = true;
+    await call('PUT', '/api/instagram/settings', {
+      loginUrl:
+        'https://www.facebook.com/dialog/oauth?client_id=1076000000000001&config_id=2900000000000001',
+      facebookAppSecret: FB_SECRET,
+    });
+    const start = new URL(String((await call('GET', '/api/instagram/connect')).headers.location));
+    const back = await call(
+      'GET',
+      `/api/instagram/callback?code=abc&state=${encodeURIComponent(start.searchParams.get('state') ?? '')}`,
+    );
+    expect(String(back.headers.location)).toBe('/channels?account=needed');
+    const settings = await call<{ accountIdNeeded: boolean }>('GET', '/api/instagram/settings');
+    expect(settings.body.accountIdNeeded).toBe(true);
+
+    // An ID the login didn't share fails at Meta.
+    const wrong = await call('POST', '/api/instagram/accounts/by-id', {
+      igUserId: '17841499999999999',
+    });
+    expect(wrong.body).toEqual({ error: 'not_shared' });
+
+    const done = await call<{ accountIdNeeded: boolean; accounts: { username: string }[] }>(
+      'POST',
+      '/api/instagram/accounts/by-id',
+      { igUserId: IG_ID },
+    );
+    expect(done.status).toBe(200);
+    expect(done.body.accountIdNeeded).toBe(false);
+    expect(done.body.accounts.map((a) => a.username)).toEqual(['tgfromdebug']);
+    const [saved] = await db.select().from(instagramAccounts);
+    expect(saved?.apiHost).toBe('facebook');
+    expect(
+      calls.some(
+        (c) => c.method === 'POST' && c.url.pathname.endsWith(`/${IG_ID}/subscribed_apps`),
+      ),
+    ).toBe(true);
+    // The kept token is used up.
+    const again = await call('POST', '/api/instagram/accounts/by-id', { igUserId: IG_ID });
+    expect(again.body).toEqual({ error: 'login_needed' });
   });
 
   it('rejects unsigned webhooks', async () => {

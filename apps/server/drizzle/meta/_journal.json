@@ -50,6 +50,13 @@
       "when": 1793483881886,
       "tag": "0006_unified_login",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793494978758,
+      "tag": "0007_pending_unified_token",
+      "breakpoints": true
     }
   ]
 }

@@ -180,6 +180,8 @@ export function Channels() {
         </div>
       )}
 
+      {s?.accountIdNeeded && <AccountIdForm onSaved={() => void settings.reload()} />}
+
       {s && s.accounts.length > 0 && (
         <section aria-labelledby="accounts-h" className="grid gap-3">
           <h2 id="accounts-h" className="font-display text-display-sm font-bold">
@@ -383,6 +385,74 @@ function StepExtras({
 function canConnect(s: InstagramSettings) {
   if (s.loginMode === 'unified') return s.hasFacebookAppSecret;
   return s.loginMode === 'instagram' && s.hasInstagramAppSecret;
+}
+
+const ACCOUNT_ID_ERRORS: Record<string, string> = {
+  not_shared:
+    'Meta says your login didn’t share that account. Check the number, or click Connect Instagram again and pick the account.',
+  login_needed: 'That login has timed out. Click Connect Instagram again.',
+  other_workspace: 'That account is already connected to another workspace.',
+};
+
+/** Meta's login didn't say which Instagram account was shared: the ID Meta shows the owner does. */
+function AccountIdForm({ onSaved }: { onSaved: () => void }) {
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const igUserId = String(new FormData(e.currentTarget).get('igUserId') ?? '').trim();
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api('/instagram/accounts/by-id', { igUserId });
+      onSaved();
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? (err.fieldErrors().igUserId ??
+              ACCOUNT_ID_ERRORS[err.code] ??
+              'Couldn’t connect it. Try again in a minute.')
+          : 'Couldn’t connect it. Try again in a minute.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section aria-labelledby="account-id-h" className="card grid gap-3 border-accent">
+      <h2 id="account-id-h" className="text-lg font-bold">
+        One more step: which Instagram account?
+      </h2>
+      <p className="text-[15px]">
+        You logged in, but Meta didn’t tell Social Switchboard which Instagram account you shared.
+        Open{' '}
+        <a
+          href="https://business.facebook.com/latest/settings/connected_apps"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Business settings → Connected apps
+        </a>
+        , click your app, and under <b>Instagram accounts</b> copy the <b>ID</b> below the account
+        name.
+      </p>
+      <form onSubmit={submit} className="flex flex-wrap items-end gap-3" autoComplete="off">
+        <Field
+          label="Instagram account ID"
+          name="igUserId"
+          inputMode="numeric"
+          required
+          placeholder="17841400000000000"
+        />
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          Connect this account
+        </button>
+      </form>
+      <FormError message={error} />
+    </section>
+  );
 }
 
 const SAVED = 'Saved. Paste a new one to replace it.';

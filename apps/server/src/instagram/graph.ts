@@ -133,6 +133,13 @@ export type AssignedAccount = {
   profile_picture_url?: string;
 };
 
+/** One Instagram professional account by ID; fails unless the Unified login token may use it. */
+export async function instagramAccount(token: string, igUserId: string) {
+  const url = new URL(`${base('facebook')}/${igUserId}`);
+  url.searchParams.set('fields', 'id,username,name,profile_picture_url');
+  return call<AssignedAccount>(await http(url, { headers: bearer(token) }));
+}
+
 /** The Instagram accounts the business shared during Unified login (`/me` is the system user). */
 export async function assignedInstagramAccounts(token: string): Promise<AssignedAccount[]> {
   const list = async (fields?: string) => {
@@ -235,22 +242,30 @@ export async function findInstagramAccounts(
         `client business: ${err instanceof MetaError ? `error ${err.code} ${err.message}` : String(err)}`,
       );
     }
-    // The business the login was for: each edge on its own, so the logs show which exist.
+    // The business the login was for (needs business_management): each edge on its own, so
+    // the logs show which exist.
     for (const edge of [
       'owned_instagram_accounts',
+      'client_instagram_accounts',
       'instagram_business_accounts',
       'instagram_accounts',
     ]) {
       if (!business || found.size > 0) break;
-      await attempt(
-        `business ${edge}`,
-        async () =>
-          (
-            await get<{ data?: AssignedAccount[] }>(`${business}/${edge}`, {
-              fields: 'id,username',
-            })
-          ).data ?? [],
-      );
+      await attempt(`business ${edge}`, async () => {
+        const listed =
+          (await get<{ data?: { id: string }[] }>(`${business}/${edge}`, { fields: 'id' })).data ??
+          [];
+        notes.push(`business ${edge} listed: ${listed.length}`);
+        // Keep the Instagram professional accounts this token can read; some edges list other kinds of ID.
+        const readable = await Promise.all(
+          listed.map((a) =>
+            get<AssignedAccount>(a.id, { fields: 'id,username,name,profile_picture_url' }).catch(
+              () => undefined,
+            ),
+          ),
+        );
+        return readable.filter((a): a is AssignedAccount => Boolean(a));
+      });
     }
   }
   if (found.size === 0) {

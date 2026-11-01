@@ -97,7 +97,9 @@ Click **Connect Instagram** below. Meta asks you to log in, then to choose your 
 
 Along the way Meta may show **Ad Account · Optional** and a page called **Enter business information for new assets** (name, country, website, currency, time zone), even without ads permissions. Fill that page in with your own details. For **Website**, use your own site or this install's address, `{{PUBLIC_URL}}`. Social Switchboard doesn't use any of it.
 
-If it says no Instagram account was shared, connect again and make sure the account is ticked. If the list is empty or says "Instagram Pro account required", do the portfolio step above first.
+Meta's login often doesn't tell Social Switchboard which Instagram account you picked. When that happens, a box at the top of this page asks for the account's ID. To find it, open [Business settings → Connected apps](https://business.facebook.com/latest/settings/connected_apps), click your app, and copy the **ID** under your Instagram account's name. Social Switchboard checks the ID with Meta, so only an account you shared will connect.
+
+If the Instagram Account list on Meta's screen is empty or says "Instagram Pro account required", do the portfolio step above first.
 
 ## step: webhooks | Turn on webhooks
 
