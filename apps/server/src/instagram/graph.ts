@@ -224,21 +224,34 @@ export async function findInstagramAccounts(
     });
   }
   if (found.size === 0) {
-    await attempt('business instagram accounts', async () => {
-      const me = await get<{ client_business_id?: string }>('me', {
-        fields: 'id,client_business_id',
-      });
-      if (!me.client_business_id) return [];
-      const fields = { fields: 'id,username,name,profile_picture_url' };
-      const lists = await Promise.all(
-        ['owned_instagram_accounts', 'instagram_accounts'].map((edge) =>
-          get<{ data?: AssignedAccount[] }>(`${me.client_business_id}/${edge}`, fields)
-            .then((d) => d.data ?? [])
-            .catch(() => []),
-        ),
+    let business: string | undefined;
+    try {
+      business = (
+        await get<{ client_business_id?: string }>('me', { fields: 'id,client_business_id' })
+      ).client_business_id;
+      notes.push(`client business: ${business ? 'yes' : 'none'}`);
+    } catch (err) {
+      notes.push(
+        `client business: ${err instanceof MetaError ? `error ${err.code} ${err.message}` : String(err)}`,
       );
-      return lists.flat();
-    });
+    }
+    // The business the login was for: each edge on its own, so the logs show which exist.
+    for (const edge of [
+      'owned_instagram_accounts',
+      'instagram_business_accounts',
+      'instagram_accounts',
+    ]) {
+      if (!business || found.size > 0) break;
+      await attempt(
+        `business ${edge}`,
+        async () =>
+          (
+            await get<{ data?: AssignedAccount[] }>(`${business}/${edge}`, {
+              fields: 'id,username',
+            })
+          ).data ?? [],
+      );
+    }
   }
   if (found.size === 0) {
     await attempt('me/accounts', async () => {
@@ -248,6 +261,7 @@ export async function findInstagramAccounts(
           fields: 'instagram_business_account{id,username,name,profile_picture_url}',
         },
       );
+      notes.push(`pages granted: ${data.data?.length ?? 0}`);
       return (data.data ?? []).flatMap((p) =>
         p.instagram_business_account ? [p.instagram_business_account] : [],
       );
