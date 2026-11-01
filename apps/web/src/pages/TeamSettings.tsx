@@ -1,6 +1,8 @@
 import { type FormEvent, useState } from 'react';
+import { Link } from 'react-router';
 import { ApiError, api, type Me, useApi } from '../api';
 import { Field, FormError, Select } from '../ui';
+import { CopyText } from './Channels';
 
 // Settings for owners and admins: who's on the team (members, roles, invite links).
 
@@ -13,7 +15,10 @@ type Team = {
     role: 'owner' | 'admin' | 'agent';
   }[];
   invites: { id: string; email: string; role: string; expiresAt: string }[];
+  /** Email is set up, so invites can be sent instead of copied. */
+  canEmail: boolean;
 };
+type Invited = { to: string; link: string; sent: boolean; sendError?: string };
 
 const ROLE_HELP: Record<string, string> = {
   owner: 'Everything, including roles.',
@@ -30,23 +35,34 @@ export function TeamSection({ me }: { me: Me }) {
   const team = useApi<Team>('/team');
   const role = me.workspaces[0]?.role;
   const canInvite = role === 'owner' || role === 'admin';
-  const [link, setLink] = useState<string>();
+  const canEmail = Boolean(team.data?.canEmail);
+  const [invited, setInvited] = useState<Invited>();
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   async function invite(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
+    // "Send invite" emails it; "Just make a link" (or no email set up) hands back the link.
+    const send = (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'send';
+    const data = new FormData(form);
+    const to = String(data.get('email') ?? '').trim();
     setError(undefined);
+    setInvited(undefined);
+    setBusy(true);
     try {
-      const r = await api<Team & { link: string }>(
-        '/team/invites',
-        Object.fromEntries(new FormData(form)),
-      );
-      setLink(r.link);
+      const r = await api<Team & Omit<Invited, 'to'>>('/team/invites', {
+        email: to,
+        role: data.get('role'),
+        send,
+      });
+      setInvited({ to, link: r.link, sent: r.sent, sendError: r.sendError });
       team.setData(r);
       form.reset();
     } catch (err) {
       setError(errorText(err, 'Couldn’t make the invite.'));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -148,7 +164,7 @@ export function TeamSection({ me }: { me: Me }) {
       {canInvite && (
         <form
           onSubmit={invite}
-          className="card card-flat grid items-end gap-3 sm:grid-cols-[1fr_200px_auto]"
+          className="card card-flat grid items-end gap-3 sm:grid-cols-[1fr_200px]"
           autoComplete="off"
         >
           <Field
@@ -162,20 +178,50 @@ export function TeamSection({ me }: { me: Me }) {
             <option value="agent">Agent</option>
             <option value="admin">Admin</option>
           </Select>
-          <button type="submit" className="btn btn-primary">
-            Make invite link
-          </button>
-          <p className="text-[13px] text-muted sm:col-span-3">
+          <div className="grid gap-2 sm:col-span-2 sm:flex">
+            {canEmail ? (
+              <>
+                <button type="submit" value="send" className="btn btn-primary" disabled={busy}>
+                  Send invite
+                </button>
+                <button type="submit" value="link" className="btn" disabled={busy}>
+                  Just make a link
+                </button>
+              </>
+            ) : (
+              <button type="submit" value="link" className="btn btn-primary" disabled={busy}>
+                Make invite link
+              </button>
+            )}
+          </div>
+          <p className="text-[13px] text-muted sm:col-span-2">
             <b>Agent:</b> {ROLE_HELP.agent} <b>Admin:</b> {ROLE_HELP.admin}
+            {!canEmail && (
+              <>
+                {' '}
+                <Link to="/settings/notifications">Set up email</Link> and Switchboard can send
+                invites for you.
+              </>
+            )}
           </p>
-          {link && (
-            <div className="grid gap-1 sm:col-span-3">
-              <p className="text-[14px] font-bold">
-                Send them this link (it works once, for a week). Switchboard doesn’t email it.
-              </p>
-              <code className="select-all break-all border-2 border-edge bg-surface-2 px-2 py-1 text-[13px]">
-                {link}
-              </code>
+          {invited && (
+            <div className="grid gap-1.5 border-l-4 border-primary bg-surface-2 px-3 py-2.5 text-[14px] sm:col-span-2">
+              {invited.sent ? (
+                <p>
+                  <b>Invite sent to {invited.to}.</b> The link in it works once, for a week. If it
+                  doesn’t arrive, share this one yourself:
+                </p>
+              ) : invited.sendError ? (
+                <p>
+                  <b>The email didn’t go</b> ({invited.sendError}), but the invite is ready. Send{' '}
+                  {invited.to} this link yourself (it works once, for a week):
+                </p>
+              ) : (
+                <p>
+                  <b>Send {invited.to} this link.</b> It works once, for a week.
+                </p>
+              )}
+              <CopyText text={invited.link} />
             </div>
           )}
         </form>

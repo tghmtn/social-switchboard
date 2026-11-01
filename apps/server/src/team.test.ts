@@ -189,6 +189,71 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     });
   });
 
+  it('emails the invite once email is set up, and still hands back the link', async () => {
+    type Made = { link: string; sent: boolean; sendError?: string; invites: unknown[] };
+    // Without email, sending is refused; making a link to copy still works.
+    expect((await call<{ canEmail: boolean }>(owner, 'GET', '/api/team')).body.canEmail).toBe(
+      false,
+    );
+    expect(
+      (
+        await call(owner, 'POST', '/api/team/invites', {
+          email: 'new@example.test',
+          role: 'agent',
+          send: true,
+        })
+      ).status,
+    ).toBe(409);
+
+    await call(owner, 'PUT', '/api/settings/notifications/email', {
+      host: 'smtp.example.test',
+      port: 587,
+      security: 'starttls',
+      user: 'bot',
+      password: 'smtp-password',
+      from: 'noreply@example.test',
+      fromName: 'Social Switchboard',
+    });
+    expect((await call<{ canEmail: boolean }>(owner, 'GET', '/api/team')).body.canEmail).toBe(true);
+    const made = await call<Made>(owner, 'POST', '/api/team/invites', {
+      email: 'New@Example.test',
+      role: 'admin',
+      send: true,
+    });
+    expect(made.body.sent).toBe(true);
+    expect(mails).toHaveLength(1);
+    // Replies go to the person who invited them, not the no-reply address.
+    expect(mails[0]).toMatchObject({
+      to: 'new@example.test',
+      replyTo: 'owner@example.test',
+      subject: 'Todd invited you to Test on Social Switchboard',
+    });
+    expect(mails[0]?.text).toContain(made.body.link);
+    expect(mails[0]?.html).toContain('Join the team');
+
+    // A failed email leaves the invite in place, with the link to share by hand.
+    setMailer(async () => {
+      throw new Error('Invalid login: 535 Authentication credentials invalid');
+    });
+    try {
+      const failed = await call<Made>(owner, 'POST', '/api/team/invites', {
+        email: 'other@example.test',
+        role: 'agent',
+        send: true,
+      });
+      expect(failed.body).toMatchObject({
+        sent: false,
+        sendError: 'Invalid login: 535 Authentication credentials invalid',
+      });
+      expect(failed.body.link).toMatch(/\/invite\/[\w-]{20,}$/);
+      expect(failed.body.invites).toHaveLength(2);
+    } finally {
+      setMailer(async (_smtp, mail) => {
+        mails.push(mail);
+      });
+    }
+  });
+
   it('routes alerts by each teammate’s choices: their devices, email over SMTP, texts', async () => {
     expect(
       (

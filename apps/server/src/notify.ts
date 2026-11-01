@@ -72,7 +72,14 @@ export function setNotifyHttp(impl: typeof fetch) {
 
 // ------------------------------------------------------------------ email (SMTP)
 
-export type Mail = { to: string; subject: string; text: string; html?: string };
+export type Mail = {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  /** Where replies go, when not back to the sending address. */
+  replyTo?: string;
+};
 type Mailer = (smtp: SmtpSettings & { password?: string }, mail: Mail) => Promise<void>;
 
 let mailer: Mailer = async (smtp, mail) => {
@@ -93,6 +100,7 @@ let mailer: Mailer = async (smtp, mail) => {
     subject: mail.subject,
     text: mail.text,
     html: mail.html,
+    replyTo: mail.replyTo,
   });
 };
 /** Swappable for tests. */
@@ -332,6 +340,40 @@ export function alertEmail(
 <p style="margin:0 0 16px;white-space:pre-wrap">${escapeHtml(text)}</p>
 <p style="margin:0 0 24px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#6d4aff;color:#fff;padding:10px 16px;text-decoration:none;font-weight:700">Open the conversation</a></p>
 <p style="margin:0;font-size:12px;color:#666">Social Switchboard · <a href="${escapeHtml(settings)}" style="color:#666">Choose what you get</a></p>
+</div>`,
+  };
+}
+
+/** An invite to join the team, with the one-time link; replies go to whoever sent it. */
+export function inviteEmail(invite: {
+  to: string;
+  from: { name: string; email: string };
+  workspace: string;
+  role: 'admin' | 'agent';
+  link: string;
+  expiresAt: Date;
+}) {
+  const what =
+    invite.role === 'admin'
+      ? 'You’ll be able to run everything: the inbox, flows, channels and notifications.'
+      : 'You’ll answer messages in the shared inbox and help with contacts and flows.';
+  const until = invite.expiresAt.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+  const subject = `${invite.from.name} invited you to ${invite.workspace} on Social Switchboard`;
+  return {
+    to: invite.to,
+    replyTo: invite.from.email,
+    subject,
+    text: `${subject}.\n\n${what}\n\nJoin the team: ${invite.link}\n\nThe link works once, until ${until}. If you weren’t expecting this, you can ignore it.`,
+    html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5;color:#111">
+<p style="font-size:17px;font-weight:700;margin:0 0 8px">${escapeHtml(subject)}</p>
+<p style="margin:0 0 16px">${escapeHtml(what)}</p>
+<p style="margin:0 0 16px"><a href="${escapeHtml(invite.link)}" style="display:inline-block;background:#6d4aff;color:#fff;padding:10px 16px;text-decoration:none;font-weight:700">Join the team</a></p>
+<p style="margin:0 0 24px;font-size:13px;color:#666">The link works once, until ${escapeHtml(until)}. If you weren’t expecting this, you can ignore it.</p>
+<p style="margin:0;font-size:12px;color:#666">Social Switchboard</p>
 </div>`,
   };
 }

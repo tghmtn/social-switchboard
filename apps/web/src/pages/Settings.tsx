@@ -266,7 +266,7 @@ function DataSection() {
             required
             placeholder="budget"
             pattern="[a-z][a-z0-9_]*"
-            hint="lowercase, numbers, _"
+            title="Lowercase letters, numbers and _, starting with a letter."
           />
           <Select label="Type" name="type" defaultValue="text">
             {['text', 'number', 'date', 'email', 'phone', 'url', 'choice'].map((t) => (
@@ -275,10 +275,14 @@ function DataSection() {
               </option>
             ))}
           </Select>
-          <button type="submit" className="btn btn-primary sm:mb-[22px]">
+          <button type="submit" className="btn btn-primary">
             Add field
           </button>
-          <div className="sm:col-span-4">
+          <p className="text-[13px] text-muted sm:col-span-4">
+            The key is how flows use it, like <code>{'{{budget}}'}</code>: lowercase letters,
+            numbers and _.
+          </p>
+          <div className="empty:hidden sm:col-span-4">
             <FormError message={fieldError} />
           </div>
         </form>

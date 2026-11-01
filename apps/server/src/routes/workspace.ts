@@ -17,6 +17,7 @@ import {
 import {
   alertEmail,
   DEFAULT_EVENTS,
+  inviteEmail,
   NOTICE_INFO,
   notifyDevice,
   recipients,
@@ -392,13 +393,21 @@ export const workspaceRoutes =
           )
           .orderBy(asc(invites.createdAt)),
       ]);
-      return { members, invites: pending };
+      const [ws] = await db
+        .select({ smtp: workspaces.smtp })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId));
+      /** Email is set up, so invites can be sent instead of copied. */
+      return { members, invites: pending, canEmail: Boolean(ws?.smtp) };
     };
 
     app.get('/team', async (req) => team(who(req).workspace.id));
 
-    /** Makes an invite link. Switchboard doesn't send email yet, so the link is shown to copy. */
-    app.post('/team/invites', async (req) => {
+    /**
+     * Makes an invite link, and with `send` emails it to them (once email is set up). The link
+     * comes back either way, to copy if the email doesn't go.
+     */
+    app.post('/team/invites', async (req, reply) => {
       const { user, workspace } = requireAdmin(req);
       const body = z
         .object({
@@ -407,8 +416,14 @@ export const workspaceRoutes =
             .max(254)
             .transform((e) => e.toLowerCase()),
           role: z.enum(['admin', 'agent']),
+          send: z.boolean().default(false),
         })
         .parse(req.body);
+      const from = body.send ? await senders(db, config.appSecret, workspace.id) : undefined;
+      if (body.send && !from?.smtp)
+        return reply
+          .code(409)
+          .send({ error: 'Set up email in Settings → Notifications to send invites.' });
       const [member] = await db
         .select({ id: users.id })
         .from(workspaceMembers)
@@ -416,15 +431,41 @@ export const workspaceRoutes =
         .where(and(eq(workspaceMembers.workspaceId, workspace.id), eq(users.email, body.email)));
       if (member) throw conflict('They’re already on the team.');
       const token = randomBytes(24).toString('base64url');
+      const expiresAt = new Date(Date.now() + INVITE_DAYS * 24 * 3_600_000);
       await db.insert(invites).values({
         workspaceId: workspace.id,
         email: body.email,
         role: body.role,
         tokenHash: inviteHash(token),
         invitedBy: user.id,
-        expiresAt: new Date(Date.now() + INVITE_DAYS * 24 * 3_600_000),
+        expiresAt,
       });
-      return { link: `${config.publicUrl}/invite/${token}`, ...(await team(workspace.id)) };
+      const link = `${config.publicUrl}/invite/${token}`;
+      let sent = false;
+      let sendError: string | undefined;
+      if (from?.smtp) {
+        const [ws] = await db
+          .select({ name: workspaces.name })
+          .from(workspaces)
+          .where(eq(workspaces.id, workspace.id));
+        try {
+          await sendEmail(
+            from.smtp,
+            inviteEmail({
+              to: body.email,
+              from: { name: user.name, email: user.email },
+              workspace: ws?.name ?? 'the team',
+              role: body.role,
+              link,
+              expiresAt,
+            }),
+          );
+          sent = true;
+        } catch (err) {
+          sendError = err instanceof Error ? err.message : String(err);
+        }
+      }
+      return { link, sent, sendError, ...(await team(workspace.id)) };
     });
 
     app.delete('/team/invites/:id', async (req) => {
