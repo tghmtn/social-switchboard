@@ -451,7 +451,10 @@ function AiForm({ step, onChange, ctx }: Props<'ai'> & { ctx: Ctx }) {
       <fieldset className="grid gap-2">
         <legend className="mb-1 text-sm font-bold">Details to collect</legend>
         {d.collect.map((c, i) => (
-          <div key={c.key || i} className="grid grid-cols-[1fr_1.4fr_auto] items-end gap-2">
+          <div
+            key={c.key || i}
+            className="grid items-end gap-2 border-2 border-line p-2.5 sm:grid-cols-[1fr_1.4fr_auto] sm:border-0 sm:p-0"
+          >
             <FieldKeyInput
               label="Save to"
               value={c.key}
@@ -531,7 +534,10 @@ function AiRouteForm({ step, onChange, ctx }: Props<'ai_route'> & { ctx: Ctx }) 
         fits none of them, or a missing AI key, goes to “None of these”.
       </p>
       {d.intents.map((x, i) => (
-        <div key={x.id} className="grid grid-cols-[1fr_1.4fr_auto] items-end gap-2">
+        <div
+          key={x.id}
+          className="grid items-end gap-2 border-2 border-line p-2.5 sm:grid-cols-[1fr_1.4fr_auto] sm:border-0 sm:p-0"
+        >
           <Field
             label="Path"
             value={x.label}
