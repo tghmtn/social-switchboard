@@ -107,7 +107,12 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
         });
       if (path === `/${IG_ID}`) return json({ id: IG_ID, username: 'tgfromdebug' });
       if (path === `/${IG_ID}/media`)
-        return json({ data: [{ id: 'm1', media_type: 'IMAGE', caption: 'Hi', media_url: 'x' }] });
+        return url.searchParams.get('after') === 'c1'
+          ? json({ data: [{ id: 'm2', media_type: 'IMAGE', media_url: 'y' }] })
+          : json({
+              data: [{ id: 'm1', media_type: 'IMAGE', caption: 'Hi', media_url: 'x' }],
+              paging: { cursors: { after: 'c1' }, next: 'https://graph.facebook.com/next' },
+            });
     }
     if (url.host === 'api.instagram.com')
       return json({ access_token: 'short-token', user_id: Number(IG_ID) });
@@ -313,8 +318,18 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       'graph.facebook.com',
     );
 
-    const media = await call<{ media: { id: string }[] }>('GET', '/api/instagram/media');
+    const media = await call<{ media: { id: string }[]; after?: string }>(
+      'GET',
+      '/api/instagram/media',
+    );
     expect(media.body.media.map((m) => m.id)).toEqual(['m1']);
+    // Older posts, one page back; the last page has nothing further.
+    const older = await call<{ media: { id: string }[]; after?: string }>(
+      'GET',
+      `/api/instagram/media?after=${media.body.after}`,
+    );
+    expect(older.body.media.map((m) => m.id)).toEqual(['m2']);
+    expect(older.body.after).toBeUndefined();
 
     // A comment signed with the Meta app secret becomes a private reply through graph.facebook.com.
     const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {

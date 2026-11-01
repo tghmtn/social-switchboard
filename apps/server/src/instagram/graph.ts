@@ -444,19 +444,27 @@ export type Media = {
   timestamp?: string;
 };
 
-/** Recent posts. With Unified login `/me` is the system user, so ask the account itself. */
+/**
+ * Recent posts, newest first; `after` (from the previous page) gets older ones. With Unified
+ * login `/me` is the system user, so ask the account itself.
+ */
 export async function recentMedia(
   token: string,
   host: Host = 'instagram',
   igUserId?: string,
+  after?: string,
   limit = 30,
-): Promise<Media[]> {
+): Promise<{ media: Media[]; after?: string }> {
   const url = new URL(`${base(host)}/${host === 'facebook' && igUserId ? igUserId : 'me'}/media`);
   url.searchParams.set(
     'fields',
     'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp',
   );
   url.searchParams.set('limit', String(limit));
-  const data = await call<{ data: Media[] }>(await http(url, { headers: bearer(token) }));
-  return data.data;
+  if (after) url.searchParams.set('after', after);
+  const data = await call<{
+    data: Media[];
+    paging?: { next?: string; cursors?: { after?: string } };
+  }>(await http(url, { headers: bearer(token) }));
+  return { media: data.data, after: data.paging?.next ? data.paging.cursors?.after : undefined };
 }

@@ -133,7 +133,7 @@ Review usually takes a few days. After it's approved, click **Publish**.
 
 ## step: test | Try it
 
-1. Build a flow, publish it, and add a **Comment on a post** trigger (open the flow, then select **Start**).
+1. Open a flow and select **Start**. Under **Add a trigger**, set **When someone…** to **comments on a post**, pick the post, add your keyword, and click **Add trigger**. Then **Publish** the flow. The trigger card should say **Comment on a post** and show the post.
 2. From a **different** Instagram account, comment your keyword on that post. Comments from the connected account itself are ignored on purpose.
 3. The DM should arrive within a few seconds, and the person shows up in **Contacts**.
 

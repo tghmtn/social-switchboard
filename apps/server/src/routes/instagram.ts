@@ -523,20 +523,23 @@ export const instagramRoutes =
       return reply.code(204).send();
     });
 
-    /** Recent posts, for picking which post a comment trigger watches. */
+    /** Recent posts, for picking which post a comment trigger watches. `after` pages back. */
     app.get('/instagram/media', async (req, reply) => {
       const { workspace } = who(req);
+      const { after } = z.object({ after: z.string().max(500).optional() }).parse(req.query);
       const account = await accountFor(db, workspace.id, null);
       const token = account ? decryptOptional(config.appSecret, account.accessTokenEnc) : undefined;
       if (!account || !token) return reply.code(409).send({ error: 'not_connected' });
       try {
-        const media = await graph.recentMedia(
+        const page = await graph.recentMedia(
           token,
           account.apiHost === 'facebook' ? 'facebook' : 'instagram',
           account.igUserId,
+          after,
         );
         return {
-          media: media.map((m) => ({
+          after: page.after,
+          media: page.media.map((m) => ({
             id: m.id,
             caption: m.caption?.slice(0, 140) ?? '',
             kind:
