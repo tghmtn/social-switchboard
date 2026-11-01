@@ -618,23 +618,29 @@ describe('the lead magnet starter (WORKSHOP scenario)', () => {
   const starter = STARTERS.find((s) => s.key === 'lead_magnet');
   const g = graph(starter?.graph ?? { nodes: [], edges: [] });
 
-  it('runs from keyword to delivered worksheet', () => {
+  it('sends the worksheet at once, with nothing to tap first', () => {
+    const r = advance(g, null, { type: 'start' }, ctx());
+    expect(r.state.status).toBe('completed');
+    const [sent] = r.effects.filter((x) => x.type === 'send');
+    expect(sent?.type === 'send' && sent.message.buttons).toEqual([
+      expect.objectContaining({ kind: 'url', url: 'https://example.com/worksheet' }),
+      expect.objectContaining({ kind: 'flow', id: 'btn_more', label: 'Send me more' }),
+    ]);
+  });
+
+  it('turns a “Send me more” tap into a lead with an email', () => {
     const r = drive(g, [
-      { type: 'start' },
-      { type: 'choice', nodeId: 'pick_topic', handle: 'topic_advanced' },
+      { type: 'start', from: { nodeId: 'deliver', handle: 'btn_more' } },
       { type: 'message', text: 'not an email' },
       { type: 'message', text: 'ada@example.com' },
     ]);
     expect(r.state.status).toBe('completed');
     expect(r.contact.tags).toEqual(['workshop-interest', 'lead']);
-    expect(r.contact.fields).toMatchObject({ interest: 'Advanced', email: 'ada@example.com' });
+    expect(r.contact.fields).toMatchObject({ email: 'ada@example.com' });
     expect(r.effects).toContainEqual({ type: 'set_consent', channel: 'email', granted: true });
     const last = r.effects.filter((x) => x.type === 'send').at(-1);
     expect(
       last?.type === 'send' && last.message.buttons.map((b) => (b.kind === 'url' ? b.url : '')),
-    ).toEqual([
-      'https://example.com/worksheet',
-      'https://example.com/register?email=ada%40example.com',
-    ]);
+    ).toEqual(['https://example.com/register?email=ada%40example.com']);
   });
 });

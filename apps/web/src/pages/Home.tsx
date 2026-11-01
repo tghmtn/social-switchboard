@@ -24,7 +24,7 @@ export function Home({ me }: { me: Me }) {
       done: (o?.liveFlows ?? 0) > 0,
       title: 'Build and publish a flow',
       detail:
-        'Start from the lead magnet template: someone sends a keyword, you ask what they need, collect an email and send the resource.',
+        'Start from the lead magnet template: someone sends a keyword and gets the resource right away, and a “Send me more” tap collects their email.',
       to: '/flows',
     },
     {

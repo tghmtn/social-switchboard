@@ -106,19 +106,20 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
 
     expect((await call('POST', `/api/flows/${flowId}/publish`)).status).toBe(200);
     s = (await call<SimState>('POST', '/api/simulator/send', { text: 'Workshop!' })).body;
-    const ask = lastOut(s);
-    expect(ask.message.parts[0]).toMatchObject({ text: expect.stringContaining('Hey Ada!') });
-    expect(ask.message.quickReplies.map((q) => q.label)).toEqual(['Getting started', 'Advanced']);
-    expect(s.runs[0]).toMatchObject({ status: 'waiting', waitKind: 'choice' });
+    // The worksheet comes straight away, with a tap for more instead of a question first.
+    const sent = lastOut(s);
+    expect(sent.message.parts[0]).toMatchObject({ text: expect.stringContaining('worksheet') });
+    expect(sent.message.buttons.map((b) => b.label)).toEqual(['Get the worksheet', 'Send me more']);
+    expect(s.runs[0]?.status).toBe('completed');
 
-    // Tap "Advanced" the way Instagram reports it: label as text plus our payload.
+    // Tap "Send me more" the way Instagram reports a button: its label plus our payload.
     s = (
       await call<SimState>('POST', '/api/simulator/tap', {
-        payload: ask.payloads.topic_advanced,
-        label: 'Advanced',
+        payload: sent.payloads.btn_more,
+        label: 'Send me more',
       })
     ).body;
-    expect(outText(s).at(-1)).toMatch(/Reply with your email/);
+    expect(outText(s).at(-1)).toMatch(/Love it, Ada! What’s your email\?/);
 
     s = (await call<SimState>('POST', '/api/simulator/send', { text: 'not an email' })).body;
     expect(outText(s).at(-1)).toMatch(/doesn’t look like an email/);
@@ -126,17 +127,12 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
 
     const delivered = lastOut(s);
     expect(delivered.message.buttons.map((b) => (b.kind === 'url' ? b.url : ''))).toEqual([
-      'https://example.com/worksheet',
       'https://example.com/register?email=ada%40example.test',
     ]);
     expect(s.messages.every((m) => m.status === 'sent' || m.direction === 'in')).toBe(true);
     expect(s.runs[0]?.status).toBe('completed');
     expect(s.contact?.tags).toEqual(['workshop-interest', 'lead']);
-    expect(s.contact?.fields).toMatchObject({
-      interest: 'Advanced',
-      email: 'ada@example.test',
-      first_name: 'Ada',
-    });
+    expect(s.contact?.fields).toMatchObject({ email: 'ada@example.test', first_name: 'Ada' });
 
     // The lead shows up in Contacts, with a timeline and consent.
     const list = await call<{
@@ -148,7 +144,6 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
     const one = await call<{
       consents: { channel: string; granted: boolean }[];
       events: { type: string }[];
-      contact: { fields: { key: string; value: unknown }[] };
     }>('GET', `/api/contacts/${contactId}`);
     expect(one.body.consents).toEqual([
       expect.objectContaining({ channel: 'email', granted: true }),
@@ -162,19 +157,15 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
         'flow_completed',
       ]),
     );
-    expect(one.body.contact.fields).toEqual([
-      expect.objectContaining({ key: 'interest', label: 'Interest', value: 'Advanced' }),
-    ]);
 
     const csv = await call('GET', '/api/contacts/export.csv');
     const [header, row] = csv.raw.trim().split('\r\n');
     expect(header).toBe(
-      'id,first_name,last_name,email,phone,username,tags,channels,email_consent,sms_consent,created_at,last_seen_at,interest',
+      'id,first_name,last_name,email,phone,username,tags,channels,email_consent,sms_consent,created_at,last_seen_at',
     );
     expect(row).toContain(
       ',Ada,Lovelace,ada@example.test,,,lead; workshop-interest,simulator,true,,',
     );
-    expect(row?.endsWith(',Advanced')).toBe(true);
   });
 
   it('tests a draft with a delay, then fast-forwards it', async () => {

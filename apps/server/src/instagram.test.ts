@@ -911,21 +911,37 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect((await webhook(comment)).statusCode).toBe(200);
     await settled();
 
+    // The worksheet goes out in the one private reply, with a tap for more beside it.
     const [first] = sends();
     expect(first?.body).toMatchObject({
       recipient: { comment_id: 'c1' },
-      message: { text: expect.stringContaining('Hey there!') },
+      message: {
+        attachment: {
+          type: 'template',
+          payload: { template_type: 'button', text: expect.stringContaining('free worksheet') },
+        },
+      },
     });
     if (!first) throw new Error('no private reply was sent');
-    const quick = (
-      first.body as { message: { quick_replies: { title: string; payload: string }[] } }
-    ).message.quick_replies;
-    expect(quick.map((q) => q.title)).toEqual(['Getting started', 'Advanced']);
+    const buttons = (
+      first.body as {
+        message: {
+          attachment: { payload: { buttons: { type: string; title: string; payload?: string }[] } };
+        };
+      }
+    ).message.attachment.payload.buttons;
+    expect(buttons.map((b) => [b.type, b.title])).toEqual([
+      ['web_url', 'Get the worksheet'],
+      ['postback', 'Send me more'],
+    ]);
     expect(calls.find((c) => c.url.pathname.endsWith('/c1/replies'))?.body).toEqual({
       message: 'Check your DMs!',
     });
+    // A comment isn't consent: Instagram isn't asked for their profile yet.
+    expect(calls.some((c) => c.url.pathname.endsWith('/fan-igsid'))).toBe(false);
 
-    // They tap a quick reply: a normal DM now, inside the 24-hour window.
+    // They tap "Send me more": now they're talking to us, so their name and photo come in
+    // before the next message, which can greet them by name.
     const tap = {
       object: 'instagram',
       entry: [
@@ -935,11 +951,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
             {
               sender: { id: 'fan-igsid' },
               recipient: { id: IG_ID },
-              message: {
-                mid: 'in-1',
-                text: 'Advanced',
-                quick_reply: { payload: quick[1]?.payload },
-              },
+              postback: { mid: 'in-1', title: 'Send me more', payload: buttons[1]?.payload },
             },
           ],
         },
@@ -947,20 +959,31 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     };
     await webhook(tap);
     await settled();
+    expect(calls.some((c) => c.url.pathname.endsWith('/fan-igsid'))).toBe(true);
     const second = sends()[1];
     expect(second?.body).toMatchObject({
       recipient: { id: 'fan-igsid' },
-      message: { text: expect.stringContaining('Want the free worksheet?') },
+      message: { text: expect.stringContaining('Love it, Fan! What’s your email?') },
     });
 
-    const contacts = await call<{ contacts: { username: string; tags: string[] }[] }>(
-      'GET',
-      '/api/contacts',
-    );
-    expect(contacts.body.contacts[0]).toMatchObject({
+    const contacts = await call<{
+      contacts: {
+        id: string;
+        username: string;
+        firstName: string;
+        lastName: string;
+        tags: string[];
+      }[];
+    }>('GET', '/api/contacts');
+    const fan = contacts.body.contacts[0];
+    expect(fan).toMatchObject({
       username: 'fan_account',
+      firstName: 'Fan',
+      lastName: 'Person',
       tags: ['workshop-interest'],
     });
+    const avatar = await app.inject({ url: `/api/contacts/${fan?.id}/avatar`, cookies });
+    expect(avatar.body).toBe('fake-jpeg');
 
     // Our own account commenting is ignored.
     calls = [];

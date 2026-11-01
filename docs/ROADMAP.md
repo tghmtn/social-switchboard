@@ -377,3 +377,5 @@ From the brainstorm. Used as the acceptance test from Phase 1 on.
 8. A person takes over for complex questions.
 9. Any follow-up goes only through a permitted channel.
 10. Compare engagement, leads and registrations.
+
+Since 2026-11-01 the Lead magnet starter sends the worksheet in the first reply, with no question before it, and puts a "Send me more" button beside the link. The tap is what Instagram counts as the person messaging: it brings in their name and photo (a comment alone never does), opens the 24-hour window, and leads on to the email question (steps 4–6 after the resource instead of before it).

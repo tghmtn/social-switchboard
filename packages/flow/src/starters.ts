@@ -23,27 +23,34 @@ export const STARTERS: Starter[] = [
     key: 'lead_magnet',
     name: 'Lead magnet',
     description:
-      'Someone comments or DMs a keyword. Ask what they’re interested in, collect their email, and send the resource.',
+      'Send the resource the moment someone comments or DMs a keyword. A “Send me more” tap brings in their name, photo and email.',
     trigger: { type: 'keyword', keywords: ['WORKSHOP'], match: 'exact' },
     graph: {
       nodes: [
         { id: 'start', type: 'start', position: at(0) },
         {
-          id: 'pick_topic',
+          // The resource goes out at once. The tap is what makes them a lead: it tells Instagram
+          // they're talking to you, so their name and photo come in, and you can message them
+          // again (after a comment, one message is all you get until they do).
+          id: 'deliver',
           type: 'message',
           position: at(1),
           data: {
             parts: [
               {
                 type: 'text',
-                text: 'Hey {{first_name | there}}! 🎉 Thanks for your interest in the workshop. Which topic interests you most?',
+                text: 'Here’s your free worksheet 📄 Want more like it, and first word when the next workshop opens? Tap “Send me more”.',
               },
             ],
-            quickReplies: [
-              { id: 'topic_basics', label: 'Getting started' },
-              { id: 'topic_advanced', label: 'Advanced' },
+            buttons: [
+              {
+                id: 'btn_worksheet',
+                kind: 'url',
+                label: 'Get the worksheet',
+                url: 'https://example.com/worksheet',
+              },
+              { id: 'btn_more', kind: 'flow', label: 'Send me more' },
             ],
-            saveReplyTo: 'interest',
           },
         },
         {
@@ -58,7 +65,7 @@ export const STARTERS: Starter[] = [
           position: at(3),
           data: {
             question:
-              'Want the free worksheet? Reply with your email and I’ll send it over. We’ll only use it for the worksheet and workshop updates.',
+              'Love it, {{first_name | friend}}! What’s your email? I’ll send new worksheets and workshop dates there, and nothing else.',
             inputType: 'email',
             saveTo: 'email',
             retryMessage: 'Hmm, that doesn’t look like an email address. Could you try again?',
@@ -76,23 +83,17 @@ export const STARTERS: Starter[] = [
           },
         },
         {
-          id: 'deliver',
+          id: 'on_the_list',
           type: 'message',
           position: at(5),
           data: {
             parts: [
               {
                 type: 'text',
-                text: 'Here you go, {{first_name | friend}}! 📄 Grab the worksheet, and save your seat while spots last.',
+                text: 'You’re on the list, {{first_name | friend}}! 🎉 Save your seat for the next workshop while spots last.',
               },
             ],
             buttons: [
-              {
-                id: 'btn_worksheet',
-                kind: 'url',
-                label: 'Get the worksheet',
-                url: 'https://example.com/worksheet',
-              },
               {
                 id: 'btn_register',
                 kind: 'url',
@@ -125,14 +126,12 @@ export const STARTERS: Starter[] = [
         },
       ],
       edges: [
-        edge('start', 'next', 'pick_topic'),
-        edge('pick_topic', 'topic_basics', 'tag_interest'),
-        edge('pick_topic', 'topic_advanced', 'tag_interest'),
-        edge('pick_topic', 'other', 'tag_interest'),
+        edge('start', 'next', 'deliver'),
+        edge('deliver', 'btn_more', 'tag_interest'),
         edge('tag_interest', 'next', 'ask_email'),
         edge('ask_email', 'answered', 'mark_lead'),
         edge('ask_email', 'failed', 'no_email'),
-        edge('mark_lead', 'next', 'deliver'),
+        edge('mark_lead', 'next', 'on_the_list'),
       ],
     },
   },
