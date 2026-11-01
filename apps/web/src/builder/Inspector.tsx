@@ -573,6 +573,7 @@ function AiRouteForm({ step, onChange, ctx }: Props<'ai_route'> & { ctx: Ctx }) 
       )}
       <FieldKeyInput
         label="Save the path’s name to (optional)"
+        hint="“None of these” empties it, so it always matches their latest message."
         value={d.saveTo ?? ''}
         keys={ctx.fieldKeys}
         onChange={(v) => set({ saveTo: v || undefined })}

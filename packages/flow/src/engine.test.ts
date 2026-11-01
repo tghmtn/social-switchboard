@@ -602,6 +602,15 @@ describe('AI sort steps', () => {
     );
     expect(unconnected.state.status).toBe('completed');
     expect(unconnected.contact.fields).toMatchObject({ topic: 'Booking' });
+    // An earlier pick is emptied when this message fits none of the paths.
+    const later = advance(
+      g,
+      start.state,
+      { type: 'ai_route_result', token },
+      ctx({ contact: contact({ fields: { topic: 'Pricing' } }) }),
+    );
+    expect(later.effects).toContainEqual({ type: 'clear_field', key: 'topic' });
+    expect(later.contact.fields.topic).toBeNull();
   });
 });
 

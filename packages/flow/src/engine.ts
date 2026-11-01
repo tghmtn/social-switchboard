@@ -288,7 +288,13 @@ class Runner {
     const node = this.nodeOf(nodeId, 'ai_route');
     if (!node) return { status: 'failed', error: `Step ${nodeId} is missing.` };
     const intent = node.data.intents.find((i) => i.id === intentId);
-    if (intent && node.data.saveTo) this.setField(node.data.saveTo, intent.label);
+    const key = node.data.saveTo;
+    // The field says what their latest message was about, so "else" empties it.
+    if (key && intent) this.setField(key, intent.label);
+    if (key && !intent && (this.contact.fields[key] ?? '') !== '') {
+      this.contact.fields[key] = null;
+      this.effects.push({ type: 'clear_field', key });
+    }
     return this.follow(node.id, intent ? intent.id : 'else');
   }
 
