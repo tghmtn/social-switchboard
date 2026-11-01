@@ -9,6 +9,7 @@ import {
   type Me,
   useApi,
 } from '../api';
+import { ProviderLogo } from '../components/ProviderLogo';
 import { FormError, SecretField, Select, timeAgo } from '../ui';
 
 // Settings → AI: bring your own key from Anthropic or OpenAI (save both, pick the one in use),
@@ -100,6 +101,7 @@ export function AiSection({ me }: { me: Me }) {
                         disabled={!canEdit}
                         onChange={() => void choose({ provider: p.id })}
                       />
+                      <ProviderLogo provider={p.id} size={22} />
                       <span className="flex-1 font-bold">{p.label}</span>
                       <span className={`chip ${ok ? 'chip-success' : ''}`}>
                         {ok ? 'Ready' : s[p.id].hasKey ? 'Pick a model' : 'No key'}
@@ -276,7 +278,10 @@ function ProviderCard({
       autoComplete="off"
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className="font-bold">{info.name}</h3>
+        <h3 className="flex items-center gap-2 font-bold">
+          <ProviderLogo provider={provider} size={22} />
+          {info.name}
+        </h3>
         {inUse && <span className="chip chip-orange">In use</span>}
       </div>
       <SecretField

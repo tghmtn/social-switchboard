@@ -56,3 +56,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Simple Icons
+
+<https://simpleicons.org>. The Anthropic and OpenAI marks in `apps/web/src/components/ProviderLogo.tsx` come from Simple Icons, released under CC0 1.0 (public domain). The marks themselves are trademarks of their owners and are used only to name each AI provider.
