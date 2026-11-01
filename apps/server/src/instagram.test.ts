@@ -7,7 +7,7 @@ import { loadConfig } from './config';
 import { createDb, runMigrations } from './db/client';
 import { instagramAccounts, messages, webhookEvents } from './db/schema';
 import { toInstagramMessages } from './instagram/channel';
-import { setHttp } from './instagram/graph';
+import { isPdfUrl, setHttp } from './instagram/graph';
 import { refreshExpiringTokens } from './instagram/tokens';
 import { signRequest } from './meta';
 
@@ -54,6 +54,50 @@ describe('toInstagramMessages', () => {
   });
 });
 
+describe('files on Instagram', () => {
+  const guide = { type: 'file' as const, url: 'https://x.test/share', name: 'Guide.pdf' };
+  const text = { type: 'text' as const, text: 'Here’s the guide 👇' };
+  const open = (url: string) => ({ id: 'b1', kind: 'url' as const, label: 'Get the guide', url });
+  const template = (buttons: object[], body = text.text) => ({
+    attachment: { type: 'template', payload: { template_type: 'button', text: body, buttons } },
+  });
+
+  it('shows a file as a button in a private reply, never twice', () => {
+    const msg = { parts: [text, guide], buttons: [open(guide.url)], quickReplies: [] };
+    expect(toInstagramMessages(msg, {}, true)).toEqual([
+      template([{ type: 'web_url', url: guide.url, title: 'Get the guide' }]),
+    ]);
+    const other = { ...msg, buttons: [open('https://x.test/elsewhere')] };
+    expect(toInstagramMessages(other, {}, true)).toEqual([
+      template([
+        { type: 'web_url', url: 'https://x.test/elsewhere', title: 'Get the guide' },
+        { type: 'web_url', url: guide.url, title: '📄 Guide.pdf' },
+      ]),
+    ]);
+  });
+
+  it('sends a PDF as a document, in order', () => {
+    const msg = { parts: [text, guide], buttons: [], quickReplies: [] };
+    expect(toInstagramMessages(msg, {}, false, new Set([guide.url]))).toEqual([
+      { text: text.text },
+      { attachment: { type: 'file', payload: { url: guide.url } } },
+    ]);
+  });
+
+  it('keeps a file’s link out of the card when the buttons are full', () => {
+    const postback = (id: string) => ({ id, kind: 'flow' as const, label: id });
+    const msg = {
+      parts: [text, guide],
+      buttons: [postback('a'), postback('b'), postback('c')],
+      quickReplies: [],
+    };
+    const out = toInstagramMessages(msg, {}, false);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ attachment: { payload: { text: text.text } } });
+    expect(out[1]).toEqual({ text: `📄 Guide.pdf: ${guide.url}` });
+  });
+});
+
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const IG_ID = '17841400000000001';
 const IG_SECRET = 'a'.repeat(32);
@@ -91,6 +135,10 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
           : undefined;
     calls.push({ method: init?.method ?? 'GET', url, body });
     const path = url.pathname.replace(/^\/v[\d.]+/, '');
+    if (url.host === 'files.example.test')
+      return new Response(null, {
+        headers: { 'content-type': path === '/guide.pdf' ? 'application/pdf' : 'text/html' },
+      });
     if (url.host === 'graph.facebook.com') {
       if (path === '/oauth/access_token') return json({ access_token: 'system-user-token' });
       if (path === '/me/assigned_instagram_accounts')
@@ -496,6 +544,12 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     await settled();
     const cleared = await call<Status>('GET', '/api/instagram/settings');
     expect(cleared.body.accounts[0]?.statusDetail).toBeNull();
+  });
+
+  it('tells a real PDF link from a page that shows one', async () => {
+    expect(await isPdfUrl('https://files.example.test/guide.pdf')).toBe(true);
+    expect(await isPdfUrl('https://files.example.test/share/abc')).toBe(false);
+    expect(await isPdfUrl('http://files.example.test/guide.pdf')).toBe(false);
   });
 
   it('rejects unsigned webhooks', async () => {

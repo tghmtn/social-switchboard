@@ -224,6 +224,11 @@ function MessageForm({ step, onChange, ctx }: Props<'message'> & { ctx: Ctx }) {
                   value={p.url}
                   onChange={(e) => setPart(i, { ...p, url: e.target.value })}
                   placeholder="https://…/guide.pdf"
+                  hint={
+                    d.buttons.length >= 3
+                      ? 'Instagram: a direct link to a PDF arrives as a document. The buttons are full, so any other link arrives as plain text.'
+                      : 'Instagram: a direct link to a PDF (up to 25MB) arrives as a document. Any other link, like a share page, arrives as a button named after the file. In the first reply to a comment, files are always buttons.'
+                  }
                 />
                 <Field
                   label="File name"

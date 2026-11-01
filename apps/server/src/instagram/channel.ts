@@ -3,73 +3,90 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { instagramAccounts, messages, type OutboundContent } from '../db/schema';
 import type { ChannelAdapter, SendResult } from '../runtime/channels';
-import { type Host, MESSAGES_OFF, MetaError, replyToComment, sendMessage } from './graph';
+import { type Host, isPdfUrl, MESSAGES_OFF, MetaError, replyToComment, sendMessage } from './graph';
 import { accountFor, decryptOptional } from './settings';
 
 const DAY = 24 * 3_600_000;
 const TEXT_LIMIT = 1000;
 const BUTTON_TEXT_LIMIT = 640;
 
+type FilePart = Extract<OutboundMessage['parts'][number], { type: 'file' }>;
+type Button =
+  | { type: 'web_url'; url: string; title: string }
+  | { type: 'postback'; title: string; payload: string };
+
+const fileText = (p: FilePart) => `📄 ${p.name}: ${p.url}`;
+/** Instagram button titles stop at 20 characters. */
+const fileTitle = (p: FilePart) => Array.from(`📄 ${p.name}`).slice(0, 20).join('');
+
 /**
- * Turns one flow message into Instagram API messages. Everything goes out in order; buttons ride
- * on the last text as a button template, quick replies on the last message. A private reply to a
- * comment must be a single message, so it's collapsed into one.
+ * Turns one flow message into Instagram API messages, in order. Buttons ride on the last text as
+ * a button template, quick replies on the last message. Instagram never makes links tappable inside
+ * a template, so a file goes as a document when it's a PDF Instagram can fetch (`pdfs`), otherwise
+ * as a link button (skipped if a button already opens it), and only as plain text once the three
+ * buttons are taken. A private reply to a comment must be a single message: there every file is a
+ * button.
  */
 export function toInstagramMessages(
   msg: OutboundMessage,
   payloads: Record<string, string>,
   single: boolean,
+  pdfs: ReadonlySet<string> = new Set(),
 ): object[] {
-  const texts = msg.parts.flatMap((p) =>
-    p.type === 'text' ? [p.text] : p.type === 'file' ? [`📄 ${p.name}: ${p.url}`] : [],
-  );
-  const out: object[] = [];
-  let finalText: string | undefined;
+  const buttons: Button[] = msg.buttons
+    .slice(0, 3)
+    .map((b) =>
+      b.kind === 'url'
+        ? { type: 'web_url', url: b.url, title: b.label }
+        : { type: 'postback', title: b.label, payload: payloads[b.id] ?? b.id },
+    );
+  /** Adds a link button for the file; false when the buttons are full. */
+  const asButton = (p: FilePart) => {
+    if (buttons.some((b) => b.type === 'web_url' && b.url === p.url)) return true;
+    if (buttons.length >= 3) return false;
+    buttons.push({ type: 'web_url', url: p.url, title: fileTitle(p) });
+    return true;
+  };
 
+  // Text items carry `text` (`link`: a file's link, kept out of the template so it stays tappable);
+  // anything else is already an API message (an attachment).
+  const items: ({ text: string; link?: boolean } | { attachment: object })[] = [];
   if (single) {
-    finalText = texts.join('\n\n');
+    const texts = msg.parts.flatMap((p) =>
+      p.type === 'text' ? [p.text] : p.type === 'file' && !asButton(p) ? [fileText(p)] : [],
+    );
+    if (texts.length > 0) items.push({ text: texts.join('\n\n') });
   } else {
-    const lastTextIndex = msg.parts.findLastIndex((p) => p.type === 'text' || p.type === 'file');
-    msg.parts.forEach((p, i) => {
-      if (i === lastTextIndex) return;
-      if (p.type === 'image') out.push({ attachment: { type: 'image', payload: { url: p.url } } });
-      else
-        out.push({
-          text: (p.type === 'text' ? p.text : `📄 ${p.name}: ${p.url}`).slice(0, TEXT_LIMIT),
-        });
-    });
-    const last = msg.parts[lastTextIndex];
-    finalText = last
-      ? last.type === 'text'
-        ? last.text
-        : last.type === 'file'
-          ? `📄 ${last.name}: ${last.url}`
-          : undefined
-      : undefined;
+    for (const p of msg.parts) {
+      if (p.type === 'text') items.push({ text: p.text });
+      else if (p.type === 'image')
+        items.push({ attachment: { type: 'image', payload: { url: p.url } } });
+      else if (pdfs.has(p.url))
+        items.push({ attachment: { type: 'file', payload: { url: p.url } } });
+      else if (!asButton(p)) items.push({ text: fileText(p), link: true });
+    }
   }
 
-  let final: Record<string, unknown> | undefined;
-  if (msg.buttons.length > 0) {
-    final = {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'button',
-          text: (finalText || '👇').slice(0, BUTTON_TEXT_LIMIT),
-          buttons: msg.buttons
-            .slice(0, 3)
-            .map((b) =>
-              b.kind === 'url'
-                ? { type: 'web_url', url: b.url, title: b.label }
-                : { type: 'postback', title: b.label, payload: payloads[b.id] ?? b.id },
-            ),
-        },
-      },
-    };
-  } else if (finalText) {
-    final = { text: finalText.slice(0, TEXT_LIMIT) };
+  let lastText = items.findLastIndex((m) => 'text' in m && !m.link);
+  if (buttons.length > 0 && lastText < 0) {
+    items.push({ text: '👇' });
+    lastText = items.length - 1;
   }
-  if (final) out.push(final);
+  const out: Record<string, unknown>[] = items.map((m, i) => {
+    if (!('text' in m)) return m;
+    if (i === lastText && buttons.length > 0)
+      return {
+        attachment: {
+          type: 'template',
+          payload: {
+            template_type: 'button',
+            text: (m.text || '👇').slice(0, BUTTON_TEXT_LIMIT),
+            buttons,
+          },
+        },
+      };
+    return { text: m.text.slice(0, TEXT_LIMIT) };
+  });
 
   if (msg.quickReplies.length > 0) {
     if (out.length === 0) out.push({ text: '👇' });
@@ -141,11 +158,18 @@ export function instagramChannel(db: Db, appSecret: string): ChannelAdapter {
         const recipient = content.privateReplyTo
           ? { comment_id: content.privateReplyTo }
           : { id: target.externalId };
+        const single = Boolean(content.privateReplyTo);
+        // Which file links Instagram can attach as documents (a private reply shows files as buttons).
+        const pdfs = new Set<string>();
+        if (!single)
+          for (const p of content.message.parts)
+            if (p.type === 'file' && (await isPdfUrl(p.url))) pdfs.add(p.url);
         let lastId: string | undefined;
         for (const message of toInstagramMessages(
           content.message,
           content.payloads,
-          Boolean(content.privateReplyTo),
+          single,
+          pdfs,
         )) {
           const res = await sendMessage(account.igUserId, token, recipient, message, host);
           lastId = res.message_id ?? lastId;

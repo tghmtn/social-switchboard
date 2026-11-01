@@ -143,6 +143,39 @@ export type AssignedAccount = {
   profile_picture_url?: string;
 };
 
+/** Largest file Instagram attaches to a message. */
+const FILE_MAX = 25 * 1024 * 1024;
+const pdfChecks = new Map<string, { pdf: boolean; at: number }>();
+
+/**
+ * Whether Instagram can send this link as a document: an https link to a PDF (by its Content-Type)
+ * of at most 25MB. A share page that shows a file isn't one. Remembered for an hour.
+ */
+export async function isPdfUrl(url: string): Promise<boolean> {
+  const hit = pdfChecks.get(url);
+  if (hit && Date.now() - hit.at < 3_600_000) return hit.pdf;
+  let pdf = false;
+  try {
+    if (/^https:\/\//i.test(url)) {
+      const ask = (method: string) =>
+        http(url, { method, redirect: 'follow', signal: AbortSignal.timeout(4000) });
+      let res = await ask('HEAD');
+      if (res.status === 405 || res.status === 403) {
+        res = await ask('GET'); // some servers refuse HEAD; read the headers, skip the body
+        await res.body?.cancel();
+      }
+      pdf =
+        res.ok &&
+        /^application\/pdf\b/i.test(res.headers.get('content-type') ?? '') &&
+        Number(res.headers.get('content-length') ?? 0) <= FILE_MAX;
+    }
+  } catch {
+    pdf = false; // unreachable: send it as a link instead
+  }
+  pdfChecks.set(url, { pdf, at: Date.now() });
+  return pdf;
+}
+
 /** One Instagram professional account by ID; fails unless the Unified login token may use it. */
 export async function instagramAccount(token: string, igUserId: string) {
   const url = new URL(`${base('facebook')}/${igUserId}`);
