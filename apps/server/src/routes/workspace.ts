@@ -4,11 +4,34 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
 import { decryptSecret, encryptSecret } from '../crypto';
-import { invites, users, workspaceMembers, workspaces } from '../db/schema';
-import { ntfyTarget, publish } from '../notify';
+import {
+  ALERT_CHANNELS,
+  invites,
+  NOTICE_KINDS,
+  notificationPrefs,
+  users,
+  workspaceMembers,
+  workspaces,
+} from '../db/schema';
+import {
+  alertEmail,
+  DEFAULT_EVENTS,
+  NOTICE_INFO,
+  ntfyTarget,
+  publish,
+  recipients,
+  sendEmail,
+  senders,
+  sendSms,
+} from '../notify';
 import { conflict, notFound, requireAdmin, requireWorkspace, who } from './guard';
 
-// Workspace settings: push notifications, and the team (members, roles, invite links).
+// Workspace settings: notifications (the senders, and each teammate's choices), and the team
+// (members, roles, invite links).
+
+const ntfyUrl = z.url().refine((u) => u.startsWith('https://') && Boolean(ntfyTarget(u)), {
+  message: 'Paste an ntfy topic URL, like https://ntfy.sh/my-switchboard.',
+});
 
 /** Invite links are good for a week; only their hash is stored. */
 const INVITE_DAYS = 7;
@@ -26,23 +49,58 @@ export const workspaceRoutes =
         .where(eq(workspaces.id, workspaceId));
       return { url: ws?.url ?? null, hasToken: Boolean(ws?.tokenEnc), tokenEnc: ws?.tokenEnc };
     };
+    const myPrefs = async (workspaceId: string, userId: string) => {
+      const [row] = await db
+        .select()
+        .from(notificationPrefs)
+        .where(
+          and(eq(notificationPrefs.workspaceId, workspaceId), eq(notificationPrefs.userId, userId)),
+        );
+      return row;
+    };
 
+    /** Everything on the Notifications page: the senders, and this teammate's own choices. */
     app.get('/settings/notifications', async (req) => {
-      const { workspace } = who(req);
-      const { url, hasToken } = await notifications(workspace.id);
-      return { url, hasToken };
+      const { user, workspace } = who(req);
+      const [[ws], mine, [account]] = await Promise.all([
+        db
+          .select({
+            url: workspaces.notifyUrl,
+            tokenEnc: workspaces.notifyTokenEnc,
+            smtp: workspaces.smtp,
+            smtpPassEnc: workspaces.smtpPassEnc,
+            twilio: workspaces.twilio,
+            twilioTokenEnc: workspaces.twilioTokenEnc,
+          })
+          .from(workspaces)
+          .where(eq(workspaces.id, workspace.id)),
+        myPrefs(workspace.id, user.id),
+        db.select({ email: users.email }).from(users).where(eq(users.id, user.id)),
+      ]);
+      return {
+        /** The shared team topic: hears every alert but personal assignments. */
+        url: ws?.url ?? null,
+        hasToken: Boolean(ws?.tokenEnc),
+        email: ws?.smtp ? { ...ws.smtp, hasPassword: Boolean(ws.smtpPassEnc) } : null,
+        sms: ws?.twilio ? { ...ws.twilio, hasToken: Boolean(ws.twilioTokenEnc) } : null,
+        mine: {
+          pushUrl: mine?.pushUrl ?? null,
+          hasPushToken: Boolean(mine?.pushTokenEnc),
+          email: mine?.email ?? null,
+          accountEmail: account?.email ?? '',
+          phone: mine?.phone ?? null,
+          events: { ...DEFAULT_EVENTS, ...(mine?.events ?? {}) },
+        },
+        kinds: NOTICE_KINDS.map((id) => ({ id, ...NOTICE_INFO[id] })),
+      };
     });
 
+    /** The shared team topic. */
     app.put('/settings/notifications', async (req) => {
       const { workspace } = requireAdmin(req);
       const body = z
         .object({
-          url: z
-            .url()
-            .refine((u) => u.startsWith('https://') && Boolean(ntfyTarget(u)), {
-              message: 'Paste an ntfy topic URL, like https://ntfy.sh/my-switchboard.',
-            })
-            .nullable(),
+          url: ntfyUrl.nullable(),
           /** A new token, or null to remove it; leave it out to keep the saved one. */
           token: z.string().trim().max(200).nullable().optional(),
         })
@@ -60,32 +118,205 @@ export const workspaceRoutes =
       return { url, hasToken };
     });
 
-    /** The saved ntfy token, for the eye button (owners and admins). */
-    app.post('/settings/notifications/reveal', async (req, reply) => {
+    /** Email alerts: the SMTP server they go out through (any provider). */
+    app.put('/settings/notifications/email', async (req) => {
       const { workspace } = requireAdmin(req);
-      const { tokenEnc } = await notifications(workspace.id);
-      if (!tokenEnc) return reply.code(404).send({ error: 'Nothing is saved.' });
-      return { value: decryptSecret(config.appSecret, tokenEnc) };
+      const body = z
+        .object({
+          host: z
+            .string()
+            .trim()
+            .regex(/^[a-z0-9.-]{1,200}$/i, 'Enter the server name, like smtp.gmail.com.'),
+          port: z.coerce.number().int().min(1).max(65535),
+          security: z.enum(['tls', 'starttls', 'none']),
+          user: z.string().trim().max(200).default(''),
+          /** A new password, or null to remove it; leave it out to keep the saved one. */
+          password: z.string().max(500).nullable().optional(),
+          from: z.email('Enter the address alerts come from.'),
+          fromName: z.string().trim().max(100).default('Social Switchboard'),
+        })
+        .parse(req.body);
+      const { password, ...smtp } = body;
+      await db
+        .update(workspaces)
+        .set({
+          smtp,
+          ...(password !== undefined
+            ? { smtpPassEnc: password ? encryptSecret(config.appSecret, password) : null }
+            : {}),
+        })
+        .where(eq(workspaces.id, workspace.id));
+      return { ok: true };
+    });
+    app.delete('/settings/notifications/email', async (req) => {
+      const { workspace } = requireAdmin(req);
+      await db
+        .update(workspaces)
+        .set({ smtp: null, smtpPassEnc: null })
+        .where(eq(workspaces.id, workspace.id));
+      return { ok: true };
     });
 
-    /** Sends a test push, so you can see it arrive (or why it doesn't). */
-    app.post('/settings/notifications/test', async (req, reply) => {
+    /** Text-message alerts: the Twilio account they're sent from. */
+    app.put('/settings/notifications/sms', async (req, reply) => {
       const { workspace } = requireAdmin(req);
-      const n = await notifications(workspace.id);
-      if (!n.url) return reply.code(409).send({ error: 'Save an ntfy topic URL first.' });
+      const body = z
+        .object({
+          accountSid: z
+            .string()
+            .trim()
+            .regex(
+              /^AC[0-9a-f]{32}$/i,
+              'The Account SID starts with AC (Twilio console, Account Info).',
+            ),
+          /** A new auth token; leave it out to keep the saved one. */
+          token: z.string().trim().min(16).max(128).optional(),
+          from: z
+            .string()
+            .trim()
+            .regex(
+              /^(\+[1-9]\d{6,14}|MG[0-9a-f]{32})$/i,
+              'Use your Twilio number with the country code, like +18015551234 (or a Messaging Service SID).',
+            ),
+        })
+        .parse(req.body);
+      const [ws] = await db
+        .select({ tokenEnc: workspaces.twilioTokenEnc })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspace.id));
+      if (!body.token && !ws?.tokenEnc)
+        return reply.code(400).send({ error: 'Enter the auth token.' });
+      await db
+        .update(workspaces)
+        .set({
+          twilio: { accountSid: body.accountSid, from: body.from },
+          ...(body.token ? { twilioTokenEnc: encryptSecret(config.appSecret, body.token) } : {}),
+        })
+        .where(eq(workspaces.id, workspace.id));
+      return { ok: true };
+    });
+    app.delete('/settings/notifications/sms', async (req) => {
+      const { workspace } = requireAdmin(req);
+      await db
+        .update(workspaces)
+        .set({ twilio: null, twilioTokenEnc: null })
+        .where(eq(workspaces.id, workspace.id));
+      return { ok: true };
+    });
+
+    /** This teammate's own addresses and which alerts go where. */
+    app.put('/settings/notifications/mine', async (req) => {
+      const { user, workspace } = who(req);
+      const body = z
+        .object({
+          pushUrl: ntfyUrl.nullable().optional(),
+          /** A new token, or null to remove it; leave it out to keep the saved one. */
+          pushToken: z.string().trim().max(200).nullable().optional(),
+          email: z.email('That doesn’t look like an email address.').nullable().optional(),
+          phone: z
+            .string()
+            .trim()
+            .regex(/^\+[1-9]\d{6,14}$/, 'Use the country code, like +18015551234.')
+            .nullable()
+            .optional(),
+          events: z
+            .partialRecord(z.enum(NOTICE_KINDS), z.array(z.enum(ALERT_CHANNELS)).max(3))
+            .optional(),
+        })
+        .parse(req.body);
+      const values = {
+        ...(body.pushUrl !== undefined ? { pushUrl: body.pushUrl } : {}),
+        ...(body.pushToken !== undefined
+          ? {
+              pushTokenEnc: body.pushToken ? encryptSecret(config.appSecret, body.pushToken) : null,
+            }
+          : {}),
+        ...(body.email !== undefined ? { email: body.email } : {}),
+        ...(body.phone !== undefined ? { phone: body.phone } : {}),
+        ...(body.events
+          ? {
+              events: Object.fromEntries(
+                Object.entries(body.events).map(([k, v]) => [k, [...new Set(v)]]),
+              ),
+            }
+          : {}),
+        updatedAt: new Date(),
+      };
+      await db
+        .insert(notificationPrefs)
+        .values({ workspaceId: workspace.id, userId: user.id, ...values })
+        .onConflictDoUpdate({
+          target: [notificationPrefs.workspaceId, notificationPrefs.userId],
+          set: values,
+        });
+      return { ok: true };
+    });
+
+    /** A saved secret, for the eye button: senders' for owners and admins, your own push token. */
+    app.post('/settings/notifications/reveal', async (req, reply) => {
+      const { which } = z
+        .object({ which: z.enum(['team', 'email', 'sms', 'push']).default('team') })
+        .parse(req.body ?? {});
+      let enc: string | null | undefined;
+      if (which === 'push') {
+        const { user, workspace } = who(req);
+        enc = (await myPrefs(workspace.id, user.id))?.pushTokenEnc;
+      } else {
+        const { workspace } = requireAdmin(req);
+        const [ws] = await db
+          .select({
+            team: workspaces.notifyTokenEnc,
+            email: workspaces.smtpPassEnc,
+            sms: workspaces.twilioTokenEnc,
+          })
+          .from(workspaces)
+          .where(eq(workspaces.id, workspace.id));
+        enc = ws?.[which];
+      }
+      if (!enc) return reply.code(404).send({ error: 'Nothing is saved.' });
+      return { value: decryptSecret(config.appSecret, enc) };
+    });
+
+    /**
+     * Sends a test so you can see it arrive (or why it doesn't): to the shared team topic
+     * (owners and admins), or to your own push topic, email or phone.
+     */
+    app.post('/settings/notifications/test', async (req, reply) => {
+      const { to } = z
+        .object({ to: z.enum(['team', 'push', 'email', 'sms']).default('team') })
+        .parse(req.body ?? {});
+      const { user, workspace } = to === 'team' ? requireAdmin(req) : who(req);
+      const from = await senders(db, config.appSecret, workspace.id);
+      const me = (await recipients(db, config.appSecret, workspace.id)).find(
+        (r) => r.userId === user.id,
+      );
+      const message = {
+        title: 'Social Switchboard',
+        text: 'Notifications work. You’ll hear from us when a conversation needs you.',
+        click: `${config.publicUrl}/inbox`,
+        tags: ['white_check_mark'],
+      };
       try {
-        await publish(
-          {
-            url: n.url,
-            token: n.tokenEnc ? decryptSecret(config.appSecret, n.tokenEnc) : undefined,
-          },
-          {
-            title: 'Social Switchboard',
-            text: 'Notifications work. You’ll hear from us when a conversation needs you.',
-            click: `${config.publicUrl}/inbox`,
-            tags: ['white_check_mark'],
-          },
-        );
+        if (to === 'team') {
+          if (!from.team) return reply.code(409).send({ error: 'Save an ntfy topic URL first.' });
+          await publish(from.team, message);
+        } else if (to === 'push') {
+          if (!me?.push) return reply.code(409).send({ error: 'Save your push topic first.' });
+          await publish(me.push, message);
+        } else if (to === 'email') {
+          if (!from.smtp)
+            return reply.code(409).send({ error: 'An admin needs to set up email first.' });
+          if (!me?.email) return reply.code(409).send({ error: 'Save your email address first.' });
+          await sendEmail(
+            from.smtp,
+            alertEmail(me.email, message.title, message.text, message.click, config.publicUrl),
+          );
+        } else {
+          if (!from.twilio)
+            return reply.code(409).send({ error: 'An admin needs to set up text messages first.' });
+          if (!me?.phone) return reply.code(409).send({ error: 'Save your phone number first.' });
+          await sendSms(from.twilio, me.phone, `${message.title}: ${message.text}`);
+        }
       } catch (err) {
         return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
       }

@@ -3,8 +3,9 @@ import { ApiError, api, type FieldDef, type Me, type Tag, useApi } from '../api'
 import { getTheme, setTheme, type ThemeChoice } from '../theme';
 import { Field, FormError, PageHeader, Select } from '../ui';
 import { AiSection } from './AiSettings';
+import { NotificationsSection } from './NotificationSettings';
 import { Page } from './Shell';
-import { NotificationsSection, TeamSection } from './TeamSettings';
+import { TeamSection } from './TeamSettings';
 
 const THEMES: { value: ThemeChoice; label: string }[] = [
   { value: 'system', label: 'Match my device' },

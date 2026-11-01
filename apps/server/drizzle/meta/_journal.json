@@ -113,6 +113,13 @@
       "when": 1793510414117,
       "tag": "0015_ai_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793549431484,
+      "tag": "0016_notification_channels",
+      "breakpoints": true
     }
   ]
 }

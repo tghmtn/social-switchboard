@@ -1,8 +1,8 @@
 import { type FormEvent, useState } from 'react';
 import { ApiError, api, type Me, useApi } from '../api';
-import { Field, FormError, SecretField, Select } from '../ui';
+import { Field, FormError, Select } from '../ui';
 
-// Settings sections for owners and admins: who's on the team, and where push notifications go.
+// Settings for owners and admins: who's on the team (members, roles, invite links).
 
 type Team = {
   members: {
@@ -181,110 +181,6 @@ export function TeamSection({ me }: { me: Me }) {
         </form>
       )}
       <FormError message={error} />
-    </section>
-  );
-}
-
-export function NotificationsSection({ me }: { me: Me }) {
-  const settings = useApi<{ url: string | null; hasToken: boolean }>('/settings/notifications');
-  const role = me.workspaces[0]?.role;
-  const canEdit = role === 'owner' || role === 'admin';
-  const [message, setMessage] = useState<{ ok: boolean; text: string }>();
-
-  async function save(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const url = String(form.get('url') ?? '').trim();
-    const token = String(form.get('token') ?? '').trim();
-    setMessage(undefined);
-    try {
-      settings.setData(
-        await api('/settings/notifications', { url: url || null, ...(token && { token }) }, 'PUT'),
-      );
-      setMessage({
-        ok: true,
-        text: url ? 'Saved. Send a test to check it.' : 'Notifications off.',
-      });
-    } catch (err) {
-      setMessage({ ok: false, text: errorText(err, 'Couldn’t save.') });
-    }
-  }
-
-  return (
-    <section aria-labelledby="notify-h" className="grid gap-4">
-      <div>
-        <h2 id="notify-h" className="font-display text-display-sm font-bold">
-          Notifications
-        </h2>
-        <p className="mt-1 text-[15px] text-muted">
-          A push to your phone when a conversation needs a person: a flow hands someone off, they
-          write while the bot is paused, or nothing answered their DM. Uses{' '}
-          <a href="https://ntfy.sh" target="_blank" rel="noopener noreferrer">
-            ntfy
-          </a>{' '}
-          (free app; ntfy.sh or your own server). Tapping one opens the conversation.
-        </p>
-      </div>
-      {settings.data && (
-        <form onSubmit={save} className="card card-flat grid gap-3" autoComplete="off">
-          <Field
-            label="ntfy topic URL"
-            name="url"
-            type="url"
-            defaultValue={settings.data.url ?? ''}
-            placeholder="https://ntfy.sh/pick-a-long-random-topic"
-            disabled={!canEdit}
-            hint="Anyone who knows a topic on ntfy.sh can read it, so make the name long and random, or use your own server."
-          />
-          <SecretField
-            label="Access token (if your topic needs one)"
-            name="token"
-            saved={settings.data.hasToken}
-            hint={settings.data.hasToken ? 'Saved and encrypted.' : undefined}
-            placeholder="tk_…"
-            disabled={!canEdit}
-            reveal={
-              canEdit
-                ? async () =>
-                    (await api<{ value: string }>('/settings/notifications/reveal', {})).value
-                : undefined
-            }
-          />
-          {canEdit && (
-            <div className="flex flex-wrap gap-2">
-              <button type="submit" className="btn btn-primary">
-                Save
-              </button>
-              {settings.data.url && (
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={async () => {
-                    setMessage(undefined);
-                    try {
-                      await api('/settings/notifications/test', {});
-                      setMessage({ ok: true, text: 'Sent. It should be on your phone now.' });
-                    } catch (err) {
-                      setMessage({
-                        ok: false,
-                        text: errorText(err, 'The test didn’t go through.'),
-                      });
-                    }
-                  }}
-                >
-                  Send a test
-                </button>
-              )}
-            </div>
-          )}
-          {message &&
-            (message.ok ? (
-              <p className="text-[14px] font-bold text-success">{message.text}</p>
-            ) : (
-              <FormError message={message.text} />
-            ))}
-        </form>
-      )}
     </section>
   );
 }

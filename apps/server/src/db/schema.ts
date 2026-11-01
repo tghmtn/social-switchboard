@@ -23,6 +23,22 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+export type SmtpSettings = {
+  host: string;
+  port: number;
+  /** tls: encrypted from the start (usually 465). starttls: upgraded (usually 587). */
+  security: 'tls' | 'starttls' | 'none';
+  user: string;
+  from: string;
+  fromName: string;
+};
+export type TwilioSettings = { accountSid: string; from: string };
+/** What the app can alert people about. */
+export const NOTICE_KINDS = ['handoff', 'assigned', 'team', 'unanswered', 'paused'] as const;
+export type NoticeKind = (typeof NOTICE_KINDS)[number];
+export const ALERT_CHANNELS = ['push', 'email', 'sms'] as const;
+export type AlertChannel = (typeof ALERT_CHANNELS)[number];
+
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
 const workspaceId = () =>
@@ -40,6 +56,12 @@ export const workspaces = pgTable('workspaces', {
   /** Push notifications: an ntfy topic URL (ntfy.sh or self-hosted), and its token if it has one. */
   notifyUrl: text('notify_url'),
   notifyTokenEnc: text('notify_token_enc'),
+  /** Email alerts go out through this SMTP server (any provider); its password is encrypted. */
+  smtp: jsonb('smtp').$type<SmtpSettings | null>(),
+  smtpPassEnc: text('smtp_pass_enc'),
+  /** Text-message alerts go out through this Twilio account; its auth token is encrypted. */
+  twilio: jsonb('twilio').$type<TwilioSettings | null>(),
+  twilioTokenEnc: text('twilio_token_enc'),
   /**
    * AI, bring your own key. Both providers' keys (encrypted) and models can be saved; aiProvider
    * picks the one every AI feature uses. aiModel and aiKeyEnc are Anthropic's.
@@ -107,6 +129,30 @@ export const invites = pgTable('invites', {
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
+
+/**
+ * Where each teammate wants alerts: their own push topic, email and phone, and which events go
+ * where. No row means the defaults (see notify.ts).
+ */
+export const notificationPrefs = pgTable(
+  'notification_prefs',
+  {
+    workspaceId: workspaceId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** An ntfy topic URL for this person's phone. */
+    pushUrl: text('push_url'),
+    pushTokenEnc: text('push_token_enc'),
+    /** Defaults to their sign-in email when empty. */
+    email: text('email'),
+    /** E.164, like +18015551234. */
+    phone: text('phone'),
+    events: jsonb('events').$type<Partial<Record<NoticeKind, AlertChannel[]>>>(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] })],
+);
 
 // ---------------------------------------------------------------- contacts
 

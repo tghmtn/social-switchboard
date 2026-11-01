@@ -409,6 +409,16 @@ export const inboxRoutes =
           to: userId,
         });
       });
+      // Tell the teammate it's theirs (not when you take it yourself).
+      if (userId && userId !== user.id)
+        runtime.notify?.({
+          workspaceId: workspace.id,
+          contactId: id,
+          channel: 'inbox',
+          kind: 'assigned',
+          userId,
+          text: `${user.name} gave you this conversation.`,
+        });
       return { ok: true };
     });
 
