@@ -42,15 +42,15 @@ export function Flows() {
         />
       )}
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
         {data?.flows.map((f) => (
           <Link
             key={f.id}
             to={`/flows/${f.id}`}
-            className="card press grid gap-3 text-ink no-underline"
+            className="card press grid gap-2 p-4 text-ink no-underline sm:gap-3 sm:p-6"
           >
             <div className="flex items-start justify-between gap-3">
-              <h2 className="text-lg font-bold">{f.name}</h2>
+              <h2 className="min-w-0 text-[17px] font-bold break-words sm:text-lg">{f.name}</h2>
               {f.publishedNumber === null ? (
                 <span className="chip">Draft</span>
               ) : f.hasUnpublishedChanges ? (
@@ -59,7 +59,13 @@ export function Flows() {
                 <span className="chip chip-success">Live · v{f.publishedNumber}</span>
               )}
             </div>
-            <dl className="grid grid-cols-3 gap-3 text-[13px]">
+            {/* Phones: the numbers on one line. */}
+            <p className="text-[13px] text-muted sm:hidden">
+              {f.triggers} {f.triggers === 1 ? 'trigger' : 'triggers'} · {f.totalRuns}{' '}
+              {f.totalRuns === 1 ? 'run' : 'runs'}
+              {f.activeRuns ? ` · ${f.activeRuns} in progress` : ''} · edited {timeAgo(f.updatedAt)}
+            </p>
+            <dl className="hidden grid-cols-3 gap-3 text-[13px] sm:grid">
               <div>
                 <dt className="text-label uppercase text-muted">Triggers</dt>
                 <dd className="text-lg font-bold tabular-nums">{f.triggers}</dd>
@@ -73,7 +79,7 @@ export function Flows() {
                 <dd className="text-lg font-bold tabular-nums">{f.activeRuns}</dd>
               </div>
             </dl>
-            <p className="text-[13px] text-muted">Edited {timeAgo(f.updatedAt)}</p>
+            <p className="hidden text-[13px] text-muted sm:block">Edited {timeAgo(f.updatedAt)}</p>
           </Link>
         ))}
       </div>

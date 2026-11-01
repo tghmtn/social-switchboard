@@ -1,4 +1,4 @@
-import { InstagramLogo } from '@phosphor-icons/react';
+import { FacebookLogo, InstagramLogo } from '@phosphor-icons/react';
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
@@ -54,16 +54,21 @@ export function Inbox() {
   usePolling(list.reload, 5000);
 
   return (
-    // Fills the screen below the phone nav (all of it beside the sidebar), so only the lists scroll
-    // and the reply box stays in view.
-    <div className="grid h-[calc(100dvh-9.25rem)] min-[900px]:h-dvh lg:grid-cols-[360px_minmax(0,1fr)]">
+    // Beside the sidebar it fills the screen, so only the lists scroll and the reply box stays in
+    // view. On phones the list scrolls with the page, and a conversation takes the whole screen.
+    <div
+      className={`grid min-[900px]:h-dvh lg:grid-cols-[360px_minmax(0,1fr)] ${id ? 'h-dvh' : ''}`}
+    >
       <aside
         className={`min-h-0 flex-col border-edge bg-surface lg:flex lg:border-r-2 ${id ? 'hidden' : 'flex'}`}
         aria-label="Conversations"
       >
         <div className="grid gap-3 border-b-2 border-edge px-4 py-4">
           <h1 className="font-display text-display-sm font-bold">Inbox</h1>
-          <div className="flex flex-wrap gap-1" role="tablist">
+          <div
+            className="-mx-4 flex gap-1 overflow-x-auto px-4 [scrollbar-width:none] lg:flex-wrap"
+            role="tablist"
+          >
             {VIEWS.map((v) => (
               <button
                 key={v.id}
@@ -71,7 +76,7 @@ export function Inbox() {
                 role="tab"
                 aria-selected={view === v.id}
                 onClick={() => setParams(v.id === 'open' ? {} : { view: v.id }, { replace: true })}
-                className={`shrink-0 border-2 px-2.5 py-1 text-[13px] font-bold ${view === v.id ? 'border-edge bg-surface-2 shadow-hard-sm' : 'border-transparent hover:border-line'}`}
+                className={`shrink-0 border-2 px-3 py-1.5 text-[14px] font-bold lg:px-2.5 lg:py-1 lg:text-[13px] ${view === v.id ? 'border-edge bg-surface-2 shadow-hard-sm' : 'border-line lg:border-transparent hover:border-line'}`}
               >
                 {v.label}
                 {list.data && list.data.counts[v.id] > 0 && (
@@ -89,7 +94,7 @@ export function Inbox() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <ul className="min-h-0 flex-1 divide-y-2 divide-line overflow-y-auto">
+        <ul className="min-h-0 flex-1 divide-y-2 divide-line lg:overflow-y-auto">
           {list.data?.conversations.length === 0 && (
             <li className="px-4 py-8 text-center text-[14px] text-muted">
               {view === 'open' && !search
@@ -178,6 +183,10 @@ function Conversation({ id, onChange }: { id: string; onChange: () => void }) {
   const c = data.contact;
   const name = contactName({ ...c, username: data.identities[0]?.username });
   const ig = data.identities.find((i) => i.channel === 'instagram');
+  // The channel they talk to us on (the first identity), named in the header and the reply box.
+  const via = data.identities[0];
+  const onFacebook = via?.channel === 'facebook';
+  const channelName = onFacebook ? 'Facebook' : 'Instagram';
   const refresh = () => {
     void reload();
     onChange();
@@ -190,50 +199,49 @@ function Conversation({ id, onChange }: { id: string; onChange: () => void }) {
 
   return (
     <>
-      <header className="grid gap-3 border-b-2 border-edge bg-surface px-4 py-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className="linkbtn lg:hidden" onClick={() => navigate('/inbox')}>
-            ← Inbox
+      <header className="border-b-2 border-edge bg-surface pt-[env(safe-area-inset-top)]">
+        <div className="flex items-center gap-2 py-2 pr-2 pl-1 sm:gap-3 sm:px-4 sm:py-3">
+          <button
+            type="button"
+            className="grid size-11 shrink-0 place-items-center text-[22px] font-bold lg:hidden"
+            aria-label="Back to the inbox"
+            onClick={() => navigate('/inbox')}
+          >
+            ←
           </button>
           <Avatar name={name} size={40} src={avatarUrl(c)} />
           <div className="min-w-0 flex-1">
-            <Link to={`/contacts/${c.id}`} className="font-bold text-ink">
+            <Link to={`/contacts/${c.id}`} className="block truncate font-bold text-ink">
               {name}
             </Link>
-            <p className="flex items-center gap-1.5 text-[13px] text-muted">
-              {ig && <Icon icon={InstagramLogo} size={16} />}
-              {ig?.username ? `@${ig.username}` : 'Instagram'}
-              {ig?.followsUs ? ' · follows you' : ''}
+            <p className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">
+              {via && <Icon icon={onFacebook ? FacebookLogo : InstagramLogo} size={16} />}
+              <span className="truncate">
+                {via?.username ? `@${via.username}` : channelName}
+                {ig?.followsUs ? ' · follows you' : ''}
+              </span>
             </p>
           </div>
-          <select
-            className="input w-auto py-1 text-[13px]"
-            aria-label="Assigned to"
-            value={c.assignedUserId ?? ''}
-            onChange={async (e) => {
-              await api(`/inbox/${id}/assign`, { userId: e.target.value || null });
-              refresh();
-            }}
-          >
-            <option value="">Unassigned</option>
-            {data.team.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={async () => {
-              await api(`/inbox/${id}/status`, { status: c.status === 'open' ? 'closed' : 'open' });
-              refresh();
-            }}
-          >
-            {c.status === 'open' ? 'Close' : 'Reopen'}
-          </button>
+          <div className="hidden items-center gap-2 sm:flex">
+            <AssignSelect id={id} value={c.assignedUserId} team={data.team} onChange={refresh} />
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={async () => {
+                await api(`/inbox/${id}/status`, {
+                  status: c.status === 'open' ? 'closed' : 'open',
+                });
+                refresh();
+              }}
+            >
+              {c.status === 'open' ? 'Close' : 'Reopen'}
+            </button>
+          </div>
+          <ConversationMenu id={id} contact={c} team={data.team} onChange={refresh} />
         </div>
-        <BotStatus contact={c} onChange={refresh} />
+        <div className="px-4 pb-2.5">
+          <BotStatus contact={c} onChange={refresh} />
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -257,8 +265,115 @@ function Conversation({ id, onChange }: { id: string; onChange: () => void }) {
         </div>
       </div>
 
-      <Composer id={id} windowEndsAt={data.replyWindowEndsAt} onSent={refresh} />
+      <Composer
+        id={id}
+        channel={channelName}
+        windowEndsAt={data.replyWindowEndsAt}
+        onSent={refresh}
+      />
     </>
+  );
+}
+
+function AssignSelect({
+  id,
+  value,
+  team,
+  onChange,
+  className = 'w-auto py-1 text-[13px]',
+}: {
+  id: string;
+  value: string | null;
+  team: InboxDetail['team'];
+  onChange: () => void;
+  className?: string;
+}) {
+  return (
+    <select
+      className={`input ${className}`}
+      aria-label="Assigned to"
+      value={value ?? ''}
+      onChange={async (e) => {
+        await api(`/inbox/${id}/assign`, { userId: e.target.value || null });
+        onChange();
+      }}
+    >
+      <option value="">Unassigned</option>
+      {team.map((u) => (
+        <option key={u.id} value={u.id}>
+          {u.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Phones: assigning, closing and the contact page, behind one button. */
+function ConversationMenu({
+  id,
+  contact: c,
+  team,
+  onChange,
+}: {
+  id: string;
+  contact: InboxDetail['contact'];
+  team: InboxDetail['team'];
+  onChange: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative sm:hidden">
+      <button
+        type="button"
+        className="grid size-11 place-items-center border-2 border-transparent text-[22px] leading-none font-bold active:border-edge"
+        aria-label="Conversation options"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        ⋯
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close options"
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setOpen(false)}
+          />
+          <div className="absolute top-12 right-0 z-20 grid w-64 gap-3 border-2 border-edge bg-surface p-3 shadow-hard">
+            <div className="grid gap-1">
+              <span className="text-[13px] font-bold">Assigned to</span>
+              <AssignSelect
+                id={id}
+                value={c.assignedUserId}
+                team={team}
+                className="w-full"
+                onChange={() => {
+                  setOpen(false);
+                  onChange();
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm w-full"
+              onClick={async () => {
+                await api(`/inbox/${id}/status`, {
+                  status: c.status === 'open' ? 'closed' : 'open',
+                });
+                setOpen(false);
+                onChange();
+              }}
+            >
+              {c.status === 'open' ? 'Close conversation' : 'Reopen conversation'}
+            </button>
+            <Link to={`/contacts/${c.id}`} className="btn btn-sm w-full">
+              Contact details
+            </Link>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -276,7 +391,7 @@ function BotStatus({
       <span className={`chip ${paused ? 'chip-orange' : 'chip-success'}`}>
         {paused ? 'Bot paused' : 'Bot on'}
       </span>
-      <span className="text-muted">
+      <span className="hidden text-muted sm:inline">
         {!paused
           ? 'Flows answer their messages. Replying here pauses them for 12 hours.'
           : c.automationResumeAt
@@ -380,10 +495,13 @@ function Bubble({ m }: { m: InboxDetail['messages'][number] }) {
 /** Reply (to them) or note (to the team). Replies follow Instagram's 24-hour window. */
 function Composer({
   id,
+  channel,
   windowEndsAt,
   onSent,
 }: {
   id: string;
+  /** Instagram or Facebook, for the reply-window notes. */
+  channel: string;
   windowEndsAt: string | null;
   onSent: () => void;
 }) {
@@ -392,6 +510,15 @@ function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [suggesting, setSuggesting] = useState(false);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // The box grows with what's typed, up to a point.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
   const open = windowEndsAt !== null && new Date(windowEndsAt).getTime() > Date.now();
   const canSend = mode === 'note' || open;
 
@@ -421,8 +548,11 @@ function Composer({
   };
 
   return (
-    <form onSubmit={send} className="grid gap-2 border-t-2 border-edge bg-surface px-4 py-3">
-      <div className="flex items-center gap-1 text-[13px]" role="tablist">
+    <form
+      onSubmit={send}
+      className="grid gap-2 border-t-2 border-edge bg-surface px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] sm:px-4 sm:py-3"
+    >
+      <div className="flex flex-wrap items-center gap-1 text-[13px]" role="tablist">
         {(['reply', 'note'] as const).map((m) => (
           <button
             key={m}
@@ -436,25 +566,22 @@ function Composer({
           </button>
         ))}
         {mode === 'reply' && (
-          <span className="ml-auto text-muted">
+          <span className="ml-auto text-right text-[12px] text-muted sm:text-[13px]">
             {open
               ? `You can reply until ${clock(windowEndsAt ?? '')}`
               : windowEndsAt
-                ? 'Their last DM was over 24 hours ago, so Instagram won’t deliver a reply until they write again.'
-                : 'They haven’t DMed yet: Instagram allows replies only after they message you.'}
+                ? `Their last message was over 24 hours ago, so ${channel} won’t deliver a reply until they write again.`
+                : `They haven’t messaged yet: ${channel} allows replies only after they do.`}
           </span>
         )}
       </div>
       <div className="flex items-end gap-2">
         <textarea
-          className={`input min-h-[44px] flex-1 resize-y ${mode === 'note' ? 'border-dashed' : ''}`}
-          rows={2}
+          ref={box}
+          className={`input max-h-40 min-h-[44px] min-w-0 flex-1 resize-none ${mode === 'note' ? 'border-dashed' : ''}`}
+          rows={1}
           aria-label={mode === 'reply' ? 'Reply' : 'Note to your team'}
-          placeholder={
-            mode === 'reply'
-              ? 'Write a reply… (Enter sends, Shift+Enter for a new line)'
-              : 'Only your team sees notes.'
-          }
+          placeholder={mode === 'reply' ? 'Write a reply…' : 'Only your team sees notes.'}
           value={text}
           disabled={!canSend}
           onChange={(e) => setText(e.target.value)}
@@ -463,8 +590,9 @@ function Composer({
         {mode === 'reply' && canSend && (
           <button
             type="button"
-            className="btn"
+            className="btn shrink-0 px-3 sm:px-5"
             disabled={suggesting}
+            aria-label="Suggest a reply with AI"
             title="Draft a reply with AI. You can edit it before sending."
             onClick={async () => {
               setSuggesting(true);
@@ -483,12 +611,13 @@ function Composer({
               }
             }}
           >
-            {suggesting ? '…' : '✨ Suggest'}
+            {suggesting ? '…' : '✨'}
+            <span className="hidden sm:inline">{suggesting ? '' : 'Suggest'}</span>
           </button>
         )}
         <button
           type="submit"
-          className="btn btn-primary"
+          className="btn btn-primary shrink-0 px-4"
           disabled={!canSend || busy || !text.trim()}
         >
           {mode === 'reply' ? 'Send' : 'Add note'}

@@ -85,6 +85,7 @@ export function App() {
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/inbox/:id" element={<Inbox />} />
               <Route path="/settings" element={<Settings me={state.me} />} />
+              <Route path="/settings/:section" element={<Settings me={state.me} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

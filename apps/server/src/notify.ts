@@ -326,7 +326,7 @@ export function alertEmail(
   link: string,
   publicUrl: string,
 ) {
-  const settings = `${publicUrl}/settings#notifications-h`;
+  const settings = `${publicUrl}/settings/notifications`;
   return {
     to,
     subject: title,

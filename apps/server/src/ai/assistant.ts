@@ -220,7 +220,7 @@ const waitsForPerson = (name: string) => CHANGING_TOOLS.has(name) || name === AS
 
 /** Pages the assistant may open. */
 export const PAGE_PATH =
-  /^\/(flows(\/[\w-]{1,64})?|contacts(\/[\w-]{1,64})?|inbox(\/[\w-]{1,64})?|channels(\/(instagram|facebook))?|simulator|settings)?$/;
+  /^\/(flows(\/[\w-]{1,64})?|contacts(\/[\w-]{1,64})?|inbox(\/[\w-]{1,64})?|channels(\/(instagram|facebook))?|simulator|settings(\/(general|team|notifications|ai|data))?)?$/;
 
 // ---------------------------------------------------------------- tool inputs
 

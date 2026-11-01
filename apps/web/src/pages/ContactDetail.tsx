@@ -119,15 +119,15 @@ export function ContactDetail() {
       <Link to="/contacts" className="linkbtn w-fit">
         ← Contacts
       </Link>
-      <div className="-mt-4 flex flex-wrap items-center gap-4">
-        <Avatar name={contactName(c)} size={64} src={avatarUrl(c)} />
+      <div className="-mt-3 flex flex-wrap items-center gap-x-4 gap-y-3 sm:-mt-4">
+        <Avatar name={contactName(c)} size={56} src={avatarUrl(c)} />
         <div className="grid min-w-0 flex-1 gap-1.5">
-          <h1 className="font-display text-display-lg font-extrabold break-words">
+          <h1 className="font-display text-[1.75rem] leading-tight font-extrabold break-words sm:text-display-lg">
             {contactName(c)}
           </h1>
           <div className="flex flex-wrap gap-2">
             {data.identities.map((i) => (
-              <span key={`${i.channel}${i.externalId}`} className="chip">
+              <span key={`${i.channel}${i.externalId}`} className="chip max-w-full truncate">
                 {i.channel}
                 {i.username ? ` @${i.username}` : ''}
                 {i.verified ? ' ✓' : ''}
@@ -145,7 +145,7 @@ export function ContactDetail() {
           </div>
         </div>
         {data.identities.some((i) => i.channel !== 'simulator') && (
-          <Link to={`/inbox/${c.id}`} className="btn btn-sm">
+          <Link to={`/inbox/${c.id}`} className="btn btn-sm w-full sm:w-auto">
             Open in Inbox
           </Link>
         )}

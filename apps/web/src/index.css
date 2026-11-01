@@ -520,6 +520,17 @@
     border: var(--sb-border-width) solid var(--sb-edge);
     border-radius: 0;
   }
+  @media (pointer: coarse) {
+    .input {
+      font-size: 1rem;
+    }
+    .btn {
+      min-height: 2.75rem;
+    }
+    .btn-sm {
+      min-height: 2.5rem;
+    }
+  }
   .input::placeholder {
     color: var(--sb-muted);
     opacity: 1;
@@ -566,6 +577,57 @@
     background: var(--sb-surface-2);
     border-color: var(--sb-edge);
     box-shadow: 4px 4px 0 var(--sb-shadow);
+  }
+
+  /* Phones: the bottom tab bar's items. Active = an ink bar on top and bold color. */
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.125rem;
+    min-height: 3.75rem;
+    padding: 0.5rem 0.25rem 0.375rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--sb-muted);
+    text-decoration: none;
+    border-top: 3px solid transparent;
+    margin-top: -2px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab[aria-current="page"] {
+    color: var(--sb-ink);
+    border-top-color: var(--sb-primary);
+  }
+  .tab:active {
+    background: var(--sb-surface-2);
+  }
+
+  /* Phones: a sheet that slides up from the bottom, and its rows. */
+  .sheet {
+    animation: sheet-up var(--sb-duration) var(--sb-ease);
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+  }
+  .sheet-row {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    min-height: 3.5rem;
+    padding: 0.5rem 0.625rem;
+    color: var(--sb-ink);
+    text-decoration: none;
+    border: var(--sb-border-width) solid transparent;
+  }
+  .sheet-row:active,
+  .sheet-row[aria-current="page"] {
+    background: var(--sb-surface-2);
+    border-color: var(--sb-line);
   }
 
   /* Kanban-style lane / well: surface-2 with a hairline border. */

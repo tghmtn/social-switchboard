@@ -232,7 +232,7 @@ export function AssistantPanel({ me, onClose }: { me: Me; onClose: () => void })
           {role === 'agent' ? (
             <p className="text-muted">Ask an owner or admin to add one in Settings → AI.</p>
           ) : (
-            <Link to="/settings#ai-h" className="btn btn-primary w-fit" onClick={onClose}>
+            <Link to="/settings/ai" className="btn btn-primary w-fit" onClick={onClose}>
               Set up AI in Settings
             </Link>
           )}
