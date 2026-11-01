@@ -116,7 +116,7 @@ export const TOOLS: Tool[] = [
   {
     name: 'open_page',
     description:
-      'Shows a page of the app beside this chat, so the person sees what you mean or what you just built. Paths: / (Today), /flows, /flows/<flowId> (the builder), /contacts, /contacts/<contactId>, /inbox, /inbox/<contactId>, /channels, /channels/instagram (Instagram setup), /channels/facebook (Facebook Pages), /simulator, /settings.',
+      'Shows a page of the app beside this chat, so the person sees what you mean or what you just built. Paths: / (Today), /flows, /flows/<flowId> (the builder), /contacts, /contacts/<contactId>, /inbox, /inbox/<contactId>, /channels, /channels/instagram (Instagram setup), /channels/facebook (Facebook Pages), /simulator, /settings, /settings/<section> (general, team, notifications, replies for saved replies, ai, data for fields and tags).',
     input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
   },
   {
@@ -220,7 +220,7 @@ const waitsForPerson = (name: string) => CHANGING_TOOLS.has(name) || name === AS
 
 /** Pages the assistant may open. */
 export const PAGE_PATH =
-  /^\/(flows(\/[\w-]{1,64})?|contacts(\/[\w-]{1,64})?|inbox(\/[\w-]{1,64})?|channels(\/(instagram|facebook))?|simulator|settings(\/(general|team|notifications|ai|data))?)?$/;
+  /^\/(flows(\/[\w-]{1,64})?|contacts(\/[\w-]{1,64})?|inbox(\/[\w-]{1,64})?|channels(\/(instagram|facebook))?|simulator|settings(\/(general|team|notifications|replies|ai|data))?)?$/;
 
 // ---------------------------------------------------------------- tool inputs
 

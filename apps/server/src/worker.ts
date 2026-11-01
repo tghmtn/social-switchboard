@@ -10,6 +10,7 @@ import { log, logError } from './log';
 import { notifier } from './notify';
 import { allChannels } from './runtime/registry';
 import { deliverStale, type RuntimeDeps, wakeDue } from './runtime/runtime';
+import { wakeSnoozed } from './runtime/snooze';
 
 const config = loadConfig();
 const { db, pool } = createDb(config.databaseUrl);
@@ -61,6 +62,8 @@ async function tick() {
     if (!stopping) await deliverStale(runtime);
     // Pauses from a person replying in Instagram end by themselves.
     if (!stopping) await resumeDue(db);
+    // Snoozed conversations whose time has come: tell the person.
+    if (!stopping) await wakeSnoozed(db, runtime.notify);
     if (!stopping && Date.now() - lastForget > 3_600_000) {
       await forgetSentIds(db);
       lastForget = Date.now();

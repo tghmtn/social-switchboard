@@ -6,6 +6,7 @@ import { getTheme, setTheme, type ThemeChoice } from '../theme';
 import { Field, FormError, PageHeader, Select } from '../ui';
 import { AiSection } from './AiSettings';
 import { NotificationsSection } from './NotificationSettings';
+import { RepliesSection } from './SavedReplies';
 import { Page } from './Shell';
 import { TeamSection } from './TeamSettings';
 
@@ -18,11 +19,22 @@ const THEMES: { value: ThemeChoice; label: string }[] = [
   { value: 'dark', label: 'Dark' },
 ];
 
-type SectionId = 'general' | 'team' | 'notifications' | 'ai' | 'data';
+type SectionId = 'general' | 'team' | 'notifications' | 'replies' | 'ai' | 'data';
 const SECTIONS: { id: SectionId; label: string; detail: string; icon: SquareIconName }[] = [
   { id: 'general', label: 'Appearance & account', detail: 'Theme, your sign-in', icon: 'sliders' },
   { id: 'team', label: 'Team', detail: 'Teammates, roles, invites', icon: 'kit' },
-  { id: 'notifications', label: 'Notifications', detail: 'Push, email and texts', icon: 'inbox' },
+  {
+    id: 'notifications',
+    label: 'Notifications',
+    detail: 'This phone, email, texts',
+    icon: 'inbox',
+  },
+  {
+    id: 'replies',
+    label: 'Saved replies',
+    detail: 'What you often say in the inbox',
+    icon: 'chat',
+  },
   { id: 'ai', label: 'AI', detail: 'Anthropic or OpenAI key, model', icon: 'sparkle' },
   { id: 'data', label: 'Fields & tags', detail: 'What you save about contacts', icon: 'board' },
 ];
@@ -52,6 +64,7 @@ export function Settings({ me }: { me: Me }) {
     general: <GeneralSection me={me} />,
     team: <TeamSection me={me} />,
     notifications: <NotificationsSection me={me} />,
+    replies: <RepliesSection />,
     ai: <AiSection me={me} />,
     data: <DataSection />,
   };

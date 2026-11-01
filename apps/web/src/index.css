@@ -402,6 +402,13 @@
     color: var(--sb-ink);
     white-space: nowrap;
   }
+  /* A contact's label (tag): in the case it was typed, so it reads apart from status chips. */
+  .chip.label-chip {
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
   .chip-lime {
     background: var(--sb-secondary);
     color: var(--sb-on-secondary);

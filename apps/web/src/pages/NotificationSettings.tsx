@@ -1,11 +1,20 @@
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { ApiError, api, type Me, useApi } from '../api';
-import { Field, FormError, SecretField, Select } from '../ui';
+import { currentSubscription, needsInstall, pushSupported, turnOffHere, turnOnHere } from '../push';
+import { Field, FormError, SecretField, Select, timeAgo } from '../ui';
 
-// Settings → Notifications: everyone picks which alerts reach them and how (push, email, text);
-// owners and admins set up how alerts are sent (ntfy, an SMTP server, a Twilio account).
+// Settings → Notifications: everyone picks which alerts reach them and how (Switchboard's own
+// notifications on their devices, ntfy, email, text); owners and admins set up the other ways
+// alerts are sent (a shared ntfy topic, an SMTP server, a Twilio account).
 
-type Channel = 'push' | 'email' | 'sms';
+type Channel = 'browser' | 'push' | 'email' | 'sms';
+type Device = {
+  id: string;
+  label: string;
+  endpoint: string;
+  createdAt: string;
+  lastSentAt: string | null;
+};
 type Settings = {
   url: string | null;
   hasToken: boolean;
@@ -26,12 +35,15 @@ type Settings = {
     accountEmail: string;
     phone: string | null;
     events: Record<string, Channel[]>;
+    devices: Device[];
   };
+  vapidKey: string;
   kinds: { id: string; label: string; help: string }[];
 };
 
 const CHANNELS: { id: Channel; label: string }[] = [
-  { id: 'push', label: 'Push' },
+  { id: 'browser', label: 'App' },
+  { id: 'push', label: 'ntfy' },
   { id: 'email', label: 'Email' },
   { id: 'sms', label: 'Text' },
 ];
@@ -135,6 +147,7 @@ export function NotificationsSection({ me }: { me: Me }) {
       </div>
       {s && (
         <>
+          <ThisDevice settings={s} reload={settings.reload} />
           <MyAlerts settings={s} reload={settings.reload} />
           <div className="grid gap-3">
             <h3 className="font-bold">How alerts are sent</h3>
@@ -145,6 +158,145 @@ export function NotificationsSection({ me }: { me: Me }) {
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * Switchboard's own notifications on this browser or installed app, and the other devices that
+ * have them on. Nothing to set up first: they come from this server.
+ */
+function ThisDevice({ settings: s, reload }: { settings: Settings; reload: () => Promise<void> }) {
+  const [endpoint, setEndpoint] = useState<string | null>();
+  const [message, setMessage] = useState<Message>();
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void currentSubscription().then(
+      (sub) => setEndpoint(sub?.endpoint ?? null),
+      () => setEndpoint(null),
+    );
+  }, []);
+  const here = s.mine.devices.find((d) => d.endpoint === endpoint);
+  const supported = pushSupported();
+
+  async function turnOn() {
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const why = await turnOnHere(s.vapidKey);
+      if (why) setMessage({ ok: false, text: why });
+      else {
+        setEndpoint((await currentSubscription())?.endpoint ?? null);
+        await reload();
+        setMessage({
+          ok: true,
+          text: 'On. You’ll get a notification when a conversation needs you.',
+        });
+      }
+    } catch (err) {
+      setMessage({ ok: false, text: errorText(err, 'Couldn’t turn notifications on here.') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setMessage(undefined);
+    try {
+      await api('/settings/notifications/test', { to: 'browser' });
+      setMessage({ ok: true, text: 'Sent. It should pop up in a moment.' });
+    } catch (err) {
+      setMessage({ ok: false, text: errorText(err, 'The test didn’t go through.') });
+    }
+  }
+
+  return (
+    <div className="card card-flat grid gap-3">
+      <div>
+        <h3 className="font-bold">Notifications on this device</h3>
+        <p className="mt-1 text-[14px] text-muted">
+          Switchboard’s own notifications, on your phone’s lock screen or your computer. Turn them
+          on on each device you use; nothing else to set up.
+        </p>
+      </div>
+      {!supported ? (
+        <p className="text-[14px]">
+          {needsInstall()
+            ? 'On iPhone, add Switchboard to your Home Screen first (Share → Add to Home Screen), open it from there, and turn notifications on here.'
+            : 'This browser can’t show notifications. Try Chrome, Edge, Firefox or Safari.'}
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          {here ? (
+            <>
+              <span className="chip chip-success">On here</span>
+              <button type="button" className="btn btn-sm" onClick={() => void test()}>
+                Send a test
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setMessage(undefined);
+                  try {
+                    await turnOffHere(here.id);
+                    setEndpoint(null);
+                    await reload();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Turn off here
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || endpoint === undefined}
+              onClick={() => void turnOn()}
+            >
+              Turn on notifications here
+            </button>
+          )}
+        </div>
+      )}
+      <Result message={message} />
+      {s.mine.devices.some((d) => d.endpoint !== endpoint) && (
+        <div className="grid gap-1.5">
+          <h4 className="text-[13px] font-bold text-muted">
+            {here ? 'Your other devices' : 'Your devices'}
+          </h4>
+          <ul className="divide-y-2 divide-line border-2 border-line">
+            {s.mine.devices
+              .filter((d) => d.endpoint !== endpoint)
+              .map((d) => (
+                <li key={d.id} className="flex items-center gap-3 px-3 py-2 text-[14px]">
+                  <span className="min-w-0 flex-1">
+                    <span className="font-bold">{d.label}</span>
+                    <span className="block text-[13px] text-muted">
+                      Added {timeAgo(d.createdAt)}
+                      {d.lastSentAt ? ` · last notified ${timeAgo(d.lastSentAt)}` : ''}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="linkbtn min-h-10 text-danger"
+                    onClick={async () => {
+                      await api(`/settings/notifications/devices/${d.id}`, undefined, 'DELETE');
+                      await reload();
+                    }}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -159,7 +311,8 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
 
   // A channel can be picked once it can actually reach this person.
   const ready: Record<Channel, string | undefined> = {
-    push: pushUrl.trim() ? undefined : 'Add your push topic below.',
+    browser: s.mine.devices.length ? undefined : 'Turn notifications on for a device above.',
+    push: pushUrl.trim() ? undefined : 'Add your ntfy topic below.',
     email: s.email ? undefined : 'An owner or admin needs to set up email.',
     sms: !s.sms
       ? 'An owner or admin needs to set up text messages.'
@@ -205,6 +358,7 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
       setMessage({
         ok: true,
         text: {
+          browser: 'Sent. It should pop up in a moment.',
           push: 'Sent. It should be on your phone now.',
           email: 'Sent. Check your inbox (and spam, the first time).',
           sms: 'Sent. It should arrive in a few seconds.',
@@ -218,54 +372,51 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
   return (
     <form onSubmit={save} className="card card-flat grid gap-4" autoComplete="off">
       <h3 className="font-bold">My alerts</h3>
-      <div className="overflow-x-auto border-2 border-edge">
-        <table className="w-full min-w-[460px] text-left text-[14px]">
-          <thead className="bg-surface-2 text-label uppercase text-muted">
-            <tr>
-              <th className="px-3 py-2">When</th>
-              {CHANNELS.map((c) => (
-                <th key={c.id} className="w-20 px-3 py-2 text-center">
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y-2 divide-line">
-            {s.kinds.map((k) => (
-              <tr key={k.id}>
-                <td className="px-3 py-2">
-                  <span className="font-bold">{k.label}</span>
-                  <span className="block text-[13px] text-muted">{k.help}</span>
-                </td>
-                {CHANNELS.map((c) => {
-                  const on = (events[k.id] ?? []).includes(c.id);
-                  return (
-                    <td key={c.id} className="px-3 py-2 text-center">
-                      <input
-                        type="checkbox"
-                        className="h-5 w-5"
-                        checked={on && !ready[c.id]}
-                        disabled={Boolean(ready[c.id])}
-                        title={ready[c.id]}
-                        aria-label={`${k.label} by ${c.label.toLowerCase()}`}
-                        onChange={() =>
-                          setEvents((ev) => ({
-                            ...ev,
-                            [k.id]: on
-                              ? (ev[k.id] ?? []).filter((x) => x !== c.id)
-                              : [...(ev[k.id] ?? []), c.id],
-                          }))
-                        }
-                      />
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {(['push', 'email', 'sms'] as const).some((c) => ready[c]) && (
+      {/* Each alert with a toggle per way of getting it: fits a phone without sideways scrolling. */}
+      <ul className="divide-y-2 divide-line border-2 border-edge">
+        {s.kinds.map((k) => (
+          <li
+            key={k.id}
+            className="grid gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+          >
+            <span>
+              <span className="font-bold">{k.label}</span>
+              <span className="block text-[13px] text-muted">{k.help}</span>
+            </span>
+            <span className="grid grid-cols-4 gap-1.5 sm:flex">
+              {CHANNELS.map((c) => {
+                const on = (events[k.id] ?? []).includes(c.id) && !ready[c.id];
+                return (
+                  <label
+                    key={c.id}
+                    title={ready[c.id]}
+                    className={`flex min-h-10 cursor-pointer items-center justify-center gap-1 border-2 px-1 text-[13px] font-bold sm:px-2.5 has-disabled:cursor-not-allowed has-disabled:opacity-45 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary ${on ? 'border-edge bg-surface-2 text-ink' : 'border-line text-muted'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={on}
+                      disabled={Boolean(ready[c.id])}
+                      aria-label={`${k.label} by ${c.label}`}
+                      onChange={() =>
+                        setEvents((ev) => ({
+                          ...ev,
+                          [k.id]: (ev[k.id] ?? []).includes(c.id)
+                            ? (ev[k.id] ?? []).filter((x) => x !== c.id)
+                            : [...(ev[k.id] ?? []), c.id],
+                        }))
+                      }
+                    />
+                    {on && <span aria-hidden>✓</span>}
+                    {c.label}
+                  </label>
+                );
+              })}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {CHANNELS.some((c) => ready[c.id]) && (
         <ul className="grid gap-0.5 text-[13px] text-muted">
           {CHANNELS.filter((c) => ready[c.id]).map((c) => (
             <li key={c.id}>
@@ -278,7 +429,7 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Field
-            label="Push topic (ntfy)"
+            label="ntfy topic"
             name="pushUrl"
             type="url"
             value={pushUrl}
@@ -323,7 +474,7 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
           hint="With the country code."
         />
         <SecretField
-          label="Push topic token (only if your topic needs one)"
+          label="ntfy topic token (only if your topic needs one)"
           name="pushToken"
           saved={s.mine.hasPushToken}
           hint={s.mine.hasPushToken ? 'Saved and encrypted.' : undefined}
@@ -338,7 +489,7 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
         </button>
         {s.mine.pushUrl && (
           <button type="button" className="btn" onClick={() => void test('push')}>
-            Test push
+            Test ntfy
           </button>
         )}
         {s.email && (

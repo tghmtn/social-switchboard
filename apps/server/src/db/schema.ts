@@ -34,9 +34,17 @@ export type SmtpSettings = {
 };
 export type TwilioSettings = { accountSid: string; from: string };
 /** What the app can alert people about. */
-export const NOTICE_KINDS = ['handoff', 'assigned', 'team', 'unanswered', 'paused'] as const;
+export const NOTICE_KINDS = [
+  'handoff',
+  'assigned',
+  'team',
+  'unanswered',
+  'paused',
+  'snooze',
+] as const;
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
-export const ALERT_CHANNELS = ['push', 'email', 'sms'] as const;
+/** browser: Switchboard's own notifications (Web Push); push: an ntfy topic. */
+export const ALERT_CHANNELS = ['browser', 'push', 'email', 'sms'] as const;
 export type AlertChannel = (typeof ALERT_CHANNELS)[number];
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -180,6 +188,10 @@ export const contacts = pgTable(
     conversationStatus: conversationStatus('conversation_status').notNull().default('open'),
     /** Inbox: the teammate looking after this conversation. */
     assignedUserId: uuid('assigned_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Inbox: out of the open views until then; a new message from them brings it back sooner. */
+    snoozedUntil: timestamp('snoozed_until', { withTimezone: true }),
+    /** Who snoozed it; cleared once they've been told it's back. */
+    snoozedBy: uuid('snoozed_by').references(() => users.id, { onDelete: 'set null' }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -187,6 +199,7 @@ export const contacts = pgTable(
   (t) => [
     index('contacts_workspace_created_idx').on(t.workspaceId, t.createdAt),
     index('contacts_workspace_email_idx').on(t.workspaceId, t.email),
+    index('contacts_snooze_due_idx').on(t.snoozedUntil).where(sql`${t.snoozedBy} is not null`),
   ],
 );
 
@@ -669,6 +682,44 @@ export const aiActions = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index('ai_actions_workspace_idx').on(t.workspaceId, t.createdAt)],
+);
+
+/** Inbox: replies the team sends often; {{variables}} are filled in from the contact. */
+export const savedReplies = pgTable(
+  'saved_replies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: workspaceId(),
+    title: text('title').notNull(),
+    text: text('text').notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('saved_replies_workspace_idx').on(t.workspaceId)],
+);
+
+/** Switchboard's own notifications (Web Push): one row per browser or installed app turned on. */
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: workspaceId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    endpoint: text('endpoint').notNull(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    /** "iPhone", "Chrome on a Mac"…, for the list of devices. */
+    label: text('label').notNull(),
+    createdAt: createdAt(),
+    lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('push_subscriptions_endpoint_idx').on(t.endpoint),
+    index('push_subscriptions_user_idx').on(t.workspaceId, t.userId),
+  ],
 );
 
 /** Inbox: how far each teammate has read each conversation (by message seq). */

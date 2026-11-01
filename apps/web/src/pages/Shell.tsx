@@ -1,10 +1,11 @@
 import { Moon, Sun } from '@phosphor-icons/react';
 import { type ReactNode, useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, type Me, useApi } from '../api';
 import { AssistantPanel } from '../components/Assistant';
 import { Icon } from '../components/Icon';
 import { SquareIcon, type SquareIconName } from '../components/SquareIcons';
+import { setAppBadge } from '../push';
 import { getTheme, setTheme, type ThemeChoice } from '../theme';
 import { Avatar, Wordmark } from '../ui';
 
@@ -49,6 +50,20 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     return () => clearInterval(t);
   }, [inbox.reload]);
   const unread = inbox.data?.unread ?? 0;
+  // The count on the installed app's icon, too.
+  useEffect(() => {
+    if (inbox.data) setAppBadge(inbox.data.unread);
+  }, [inbox.data]);
+  // Tapping a notification while the app is open: go to its conversation without a reload.
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e: MessageEvent<{ type?: string; path?: string }>) => {
+      if (e.data?.type === 'open' && e.data.path?.startsWith('/')) navigate(e.data.path);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [navigate]);
   const [assistant, setAssistant] = useState(false);
   const [more, setMore] = useState(false);
   // A new page closes the More sheet.

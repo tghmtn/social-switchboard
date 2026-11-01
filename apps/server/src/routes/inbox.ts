@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lte, ne, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { aiErrorText, plainText, recordUsage, workspaceAi } from '../ai/client';
@@ -14,14 +14,15 @@ import {
   workspaceMembers,
   workspaces,
 } from '../db/schema';
-import { lockContact, pauseForPerson, recordEvent } from '../runtime/contacts';
+import { loadSnapshot, lockContact, pauseForPerson, recordEvent } from '../runtime/contacts';
 import { deliver } from '../runtime/runtime';
 import { notFound, requireWorkspace, who } from './guard';
 
 // The inbox: every conversation on the real channels (the simulator stays out), newest first,
-// with read state per teammate, open/closed, an assignee, internal notes, and replies typed here.
+// with read state per teammate, open/closed, snooze, an assignee, internal notes, and replies
+// typed here.
 
-const VIEWS = ['open', 'unread', 'mine', 'attention', 'closed', 'all'] as const;
+const VIEWS = ['open', 'unread', 'mine', 'attention', 'snoozed', 'closed', 'all'] as const;
 type View = (typeof VIEWS)[number];
 const DAY = 24 * 3_600_000;
 
@@ -38,6 +39,9 @@ type Row = {
   avatar_version: string | null;
   conversation_status: 'open' | 'closed';
   assigned_user_id: string | null;
+  snoozed_until: string | null;
+  snoozed: boolean;
+  tags: string[] | null;
   automation_paused_at: string | null;
   automation_resume_at: string | null;
   last_seq: string;
@@ -76,10 +80,18 @@ export const inboxRoutes =
   async (app) => {
     app.addHook('preHandler', requireWorkspace);
 
-    /** The latest real-channel message per contact, with unread counts for this teammate. */
+    /**
+     * The latest real-channel message per contact, with unread counts for this teammate. Snoozed
+     * means hidden until a time that hasn't come; once it has, the conversation sorts as if it
+     * had just come in.
+     */
     const conversations = (workspaceId: string, userId: string) => sql`
       select c.id, c.first_name, c.last_name, c.email, c.conversation_status, c.assigned_user_id,
-        c.automation_paused_at, c.automation_resume_at,
+        c.automation_paused_at, c.automation_resume_at, c.snoozed_until,
+        coalesce(c.snoozed_until > now(), false) as snoozed,
+        (select array_agg(t.name order by lower(t.name)) from contact_tags ct
+          join tags t on t.id = ct.tag_id where ct.contact_id = c.id) as tags,
+        (select array_agg(ct.tag_id) from contact_tags ct where ct.contact_id = c.id) as tag_ids,
         (select ci.username from contact_identities ci
           where ci.contact_id = c.id and ci.username is not null limit 1) as username,
         (select ci.channel from contact_identities ci
@@ -88,6 +100,8 @@ export const inboxRoutes =
           where ca.contact_id = c.id) as avatar_version,
         lm.seq as last_seq, lm.direction as last_direction, lm.status as last_status,
         lm.content as last_content, lm.created_at as last_at,
+        case when c.snoozed_until <= now() then greatest(lm.created_at, c.snoozed_until)
+          else lm.created_at end as sort_at,
         (select count(*)::int from messages m
           where m.contact_id = c.id and m.direction = 'in' and m.channel <> 'simulator'
             and m.seq > coalesce(r.last_read_seq, 0)) as unread
@@ -103,13 +117,15 @@ export const inboxRoutes =
     const viewFilter = (view: View, userId: string) => {
       switch (view) {
         case 'open':
-          return sql`conversation_status = 'open'`;
+          return sql`conversation_status = 'open' and not snoozed`;
         case 'unread':
-          return sql`unread > 0`;
+          return sql`unread > 0 and not snoozed`;
         case 'mine':
-          return sql`assigned_user_id = ${userId} and conversation_status = 'open'`;
+          return sql`assigned_user_id = ${userId} and conversation_status = 'open' and not snoozed`;
         case 'attention':
           return sql`automation_paused_at is not null`;
+        case 'snoozed':
+          return sql`snoozed and conversation_status = 'open'`;
         case 'closed':
           return sql`conversation_status = 'closed'`;
         case 'all':
@@ -123,6 +139,9 @@ export const inboxRoutes =
         .object({
           view: z.enum(VIEWS).default('open'),
           q: z.string().trim().max(200).optional(),
+          /** A tag's id: only contacts with it. */
+          tag: z.uuid().optional(),
+          channel: z.enum(['instagram', 'facebook']).optional(),
           limit: z.coerce.number().int().min(1).max(200).default(60),
         })
         .parse(req.query);
@@ -132,19 +151,23 @@ export const inboxRoutes =
         ? sql`(coalesce(first_name, '') || ' ' || coalesce(last_name, '') || ' ' ||
             coalesce(username, '') || ' ' || coalesce(email, '')) ilike ${like}`
         : sql`true`;
+      // A label or channel narrows the counts too, so the tabs say what's in that slice.
+      const slice = sql`${q.tag ? sql`${q.tag}::uuid = any(tag_ids)` : sql`true`} and ${
+        q.channel ? sql`channel = ${q.channel}` : sql`true`
+      }`;
       const [rows, counts] = await Promise.all([
         db.execute<Row>(sql`select * from (${base}) conv
-          where ${viewFilter(q.view, user.id)} and ${search}
-          order by last_at desc limit ${q.limit}`),
+          where ${viewFilter(q.view, user.id)} and ${slice} and ${search}
+          order by sort_at desc limit ${q.limit}`),
         db.execute<Record<View, number>>(sql`select
-            count(*) filter (where conversation_status = 'open')::int as open,
-            count(*) filter (where unread > 0)::int as unread,
-            count(*) filter (where assigned_user_id = ${user.id}
-              and conversation_status = 'open')::int as mine,
-            count(*) filter (where automation_paused_at is not null)::int as attention,
-            count(*) filter (where conversation_status = 'closed')::int as closed,
+            count(*) filter (where ${viewFilter('open', user.id)})::int as open,
+            count(*) filter (where ${viewFilter('unread', user.id)})::int as unread,
+            count(*) filter (where ${viewFilter('mine', user.id)})::int as mine,
+            count(*) filter (where ${viewFilter('attention', user.id)})::int as attention,
+            count(*) filter (where ${viewFilter('snoozed', user.id)})::int as snoozed,
+            count(*) filter (where ${viewFilter('closed', user.id)})::int as closed,
             count(*)::int as all
-          from (${base}) conv`),
+          from (${base}) conv where ${slice}`),
       ]);
       return {
         conversations: rows.rows.map((r) => ({
@@ -157,6 +180,10 @@ export const inboxRoutes =
           avatarVersion: r.avatar_version === null ? null : Number(r.avatar_version),
           status: r.conversation_status,
           assignedUserId: r.assigned_user_id,
+          snoozedUntil: iso(r.snoozed_until),
+          /** Its snooze ran out before they wrote again (and nobody has opened it since). */
+          backFromSnooze: Boolean(r.snoozed_until && !r.snoozed),
+          tags: r.tags ?? [],
           automationPausedAt: iso(r.automation_paused_at),
           automationResumeAt: iso(r.automation_resume_at),
           last: {
@@ -177,7 +204,7 @@ export const inboxRoutes =
       const { user, workspace } = who(req);
       const result = await db.execute<{ n: number }>(sql`select count(*)::int as n
         from (${conversations(workspace.id, user.id)}) conv
-        where unread > 0 and conversation_status = 'open'`);
+        where unread > 0 and conversation_status = 'open' and not snoozed`);
       return { unread: result.rows[0]?.n ?? 0 };
     });
 
@@ -194,7 +221,7 @@ export const inboxRoutes =
       const { workspace } = who(req);
       const { id } = z.object({ id: z.uuid() }).parse(req.params);
       const c = await contactIn(workspace.id, id);
-      const [identities, rows, notes, team, avatar] = await Promise.all([
+      const [identities, rows, notes, team, avatar, snapshot] = await Promise.all([
         db
           .select({
             channel: contactIdentities.channel,
@@ -231,6 +258,7 @@ export const inboxRoutes =
           v: string | null;
         }>(sql`select floor(extract(epoch from updated_at))::bigint as v
           from contact_avatars where contact_id = ${id}`),
+        db.transaction((tx) => loadSnapshot(tx, id, 'inbox')),
       ]);
       const names = new Map(
         team.map((u) => [u.id, [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email]),
@@ -249,6 +277,11 @@ export const inboxRoutes =
           assignedUserId: c.assignedUserId,
           automationPausedAt: c.automationPausedAt,
           automationResumeAt: c.automationResumeAt,
+          /** Only while it's still ahead. */
+          snoozedUntil: c.snoozedUntil && c.snoozedUntil > new Date() ? c.snoozedUntil : null,
+          tags: snapshot.tags,
+          /** Their fields by key, for filling in a saved reply's {{variables}}. */
+          fields: snapshot.fields,
         },
         identities,
         /** Instagram replies are only allowed within 24 hours of their last DM. */
@@ -307,6 +340,11 @@ export const inboxRoutes =
             updatedAt: new Date(),
           },
         });
+      // Seen after its snooze ran out: it's an ordinary conversation again.
+      await db
+        .update(contacts)
+        .set({ snoozedUntil: null, snoozedBy: null })
+        .where(and(eq(contacts.id, id), lte(contacts.snoozedUntil, new Date())));
       return { ok: true };
     });
 
@@ -348,6 +386,10 @@ export const inboxRoutes =
       if (sent?.status === 'sent')
         await db.transaction(async (tx) => {
           await lockContact(tx, id);
+          await tx
+            .update(contacts)
+            .set({ snoozedUntil: null, snoozedBy: null })
+            .where(eq(contacts.id, id));
           const until = await pauseForPerson(tx, id, new Date());
           await recordEvent(tx, workspace.id, id, 'person_replied', {
             by: user.id,
@@ -376,11 +418,50 @@ export const inboxRoutes =
       await update(workspace.id, id, async (tx) => {
         await tx
           .update(contacts)
-          .set({ conversationStatus: status, updatedAt: new Date() })
+          .set({
+            conversationStatus: status,
+            ...(status === 'closed' ? { snoozedUntil: null, snoozedBy: null } : {}),
+            updatedAt: new Date(),
+          })
           .where(eq(contacts.id, id));
         await recordEvent(tx, workspace.id, id, `conversation_${status}`, { by: user.id });
       });
       return { ok: true };
+    });
+
+    /**
+     * Out of the open views until a time (or null: back now). A new message from them brings it
+     * back sooner. Whoever snoozed it is told when it's back (or its assignee, if it has one).
+     */
+    app.post('/inbox/:id/snooze', async (req) => {
+      const { user, workspace } = who(req);
+      const { id } = z.object({ id: z.uuid() }).parse(req.params);
+      const { until } = z
+        .object({
+          until: z.iso
+            .datetime({ offset: true })
+            .transform((v) => new Date(v))
+            .refine((d) => d.getTime() > Date.now(), 'Pick a time that hasn’t passed.')
+            .refine((d) => d.getTime() < Date.now() + 366 * DAY, 'Pick a time within a year.')
+            .nullable(),
+        })
+        .parse(req.body);
+      await update(workspace.id, id, async (tx) => {
+        await tx
+          .update(contacts)
+          .set({
+            snoozedUntil: until,
+            snoozedBy: until ? user.id : null,
+            ...(until ? { conversationStatus: 'open' as const } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(contacts.id, id));
+        await recordEvent(tx, workspace.id, id, until ? 'conversation_snoozed' : 'snooze_ended', {
+          by: user.id,
+          ...(until ? { until: until.toISOString() } : {}),
+        });
+      });
+      return { ok: true, snoozedUntil: until };
     });
 
     app.post('/inbox/:id/assign', async (req) => {

@@ -127,6 +127,13 @@
       "when": 1793550114495,
       "tag": "0017_facebook_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793562415649,
+      "tag": "0018_inbox_basics",
+      "breakpoints": true
     }
   ]
 }

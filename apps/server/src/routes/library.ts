@@ -3,10 +3,18 @@ import { and, asc, count, eq, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
-import { contacts, contactTags, fieldDefinitions, fieldType, tags } from '../db/schema';
+import {
+  contacts,
+  contactTags,
+  fieldDefinitions,
+  fieldType,
+  savedReplies,
+  tags,
+} from '../db/schema';
 import { conflict, notFound, requireWorkspace, who } from './guard';
 
-// Custom fields and tags: the workspace's vocabulary for describing contacts.
+// Custom fields and tags, the workspace's vocabulary for describing contacts; and saved replies,
+// what the team often says in the inbox.
 
 const isUniqueViolation = (err: unknown) =>
   (err as { code?: string; cause?: { code?: string } }).code === '23505' ||
@@ -22,6 +30,10 @@ const fieldBody = z.object({
   options: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
 });
 const idParam = z.object({ id: z.uuid() });
+const replyBody = z.object({
+  title: z.string().trim().min(1, 'Give it a short name.').max(60),
+  text: z.string().trim().min(1, 'Write the reply.').max(1000),
+});
 
 export const libraryRoutes =
   ({ db }: RouteDeps): FastifyPluginAsync =>
@@ -151,6 +163,56 @@ export const libraryRoutes =
         .where(and(eq(tags.id, id), eq(tags.workspaceId, workspace.id)))
         .returning({ id: tags.id });
       if (deleted.length === 0) throw notFound('Tag');
+      return reply.code(204).send();
+    });
+
+    /** Saved replies, by name. Anyone on the team can use and change them. */
+    app.get('/saved-replies', async (req) => {
+      const { workspace } = who(req);
+      const rows = await db
+        .select({
+          id: savedReplies.id,
+          title: savedReplies.title,
+          text: savedReplies.text,
+          updatedAt: savedReplies.updatedAt,
+        })
+        .from(savedReplies)
+        .where(eq(savedReplies.workspaceId, workspace.id))
+        .orderBy(sql`lower(${savedReplies.title})`);
+      return { replies: rows };
+    });
+
+    app.post('/saved-replies', async (req, reply) => {
+      const { user, workspace } = who(req);
+      const body = replyBody.parse(req.body);
+      const [row] = await db
+        .insert(savedReplies)
+        .values({ workspaceId: workspace.id, createdBy: user.id, ...body })
+        .returning({ id: savedReplies.id, title: savedReplies.title, text: savedReplies.text });
+      return reply.code(201).send({ reply: row });
+    });
+
+    app.put('/saved-replies/:id', async (req) => {
+      const { workspace } = who(req);
+      const { id } = idParam.parse(req.params);
+      const body = replyBody.parse(req.body);
+      const [row] = await db
+        .update(savedReplies)
+        .set({ ...body, updatedAt: new Date() })
+        .where(and(eq(savedReplies.id, id), eq(savedReplies.workspaceId, workspace.id)))
+        .returning({ id: savedReplies.id, title: savedReplies.title, text: savedReplies.text });
+      if (!row) throw notFound('Saved reply');
+      return { reply: row };
+    });
+
+    app.delete('/saved-replies/:id', async (req, reply) => {
+      const { workspace } = who(req);
+      const { id } = idParam.parse(req.params);
+      const gone = await db
+        .delete(savedReplies)
+        .where(and(eq(savedReplies.id, id), eq(savedReplies.workspaceId, workspace.id)))
+        .returning({ id: savedReplies.id });
+      if (gone.length === 0) throw notFound('Saved reply');
       return reply.code(204).send();
     });
   };

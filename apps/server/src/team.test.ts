@@ -225,7 +225,11 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
       sms: { hasToken: true },
       mine: {
         accountEmail: 'owner@example.test',
-        events: { handoff: ['push', 'email', 'sms'], unanswered: [], assigned: ['push', 'email'] },
+        events: {
+          handoff: ['push', 'email', 'sms'],
+          unanswered: [],
+          assigned: ['browser', 'push', 'email'],
+        },
       },
     });
     expect(

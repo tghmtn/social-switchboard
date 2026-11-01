@@ -243,12 +243,16 @@ export type InboxConversation = {
   avatarVersion: number | null;
   status: 'open' | 'closed';
   assignedUserId: string | null;
+  snoozedUntil: string | null;
+  /** Its snooze ran out before they wrote again. */
+  backFromSnooze: boolean;
+  tags: string[];
   automationPausedAt: string | null;
   automationResumeAt: string | null;
   last: { direction: 'in' | 'out'; status: string; text: string; byPerson: boolean; at: string };
   unread: number;
 };
-export type InboxView = 'open' | 'unread' | 'mine' | 'attention' | 'closed' | 'all';
+export type InboxView = 'open' | 'unread' | 'mine' | 'attention' | 'snoozed' | 'closed' | 'all';
 export type InboxList = {
   conversations: InboxConversation[];
   counts: Record<InboxView, number>;
@@ -287,6 +291,11 @@ export type InboxDetail = {
     assignedUserId: string | null;
     automationPausedAt: string | null;
     automationResumeAt: string | null;
+    /** While it's still ahead. */
+    snoozedUntil: string | null;
+    tags: string[];
+    /** Their fields by key, for a saved reply's {{variables}}. */
+    fields: Record<string, string | number | boolean | null>;
   };
   identities: { channel: string; username: string | null; followsUs: boolean | null }[];
   /** Instagram replies are allowed until then (24 hours after their last DM). */
@@ -380,6 +389,7 @@ export type AssistantThread = {
 export type Guide = { markdown: string; source: 'latest' | 'bundled' };
 export type FieldDef = { id: string; key: string; label: string; type: string; options: string[] };
 export type Tag = { id: string; name: string; contacts: number };
+export type SavedReply = { id: string; title: string; text: string };
 
 type Issue = { path: (string | number)[]; message: string };
 

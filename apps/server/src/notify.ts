@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import nodemailer from 'nodemailer';
 import { decryptSecret } from './crypto';
 import type { Db } from './db/client';
@@ -8,16 +8,19 @@ import {
   contacts,
   type NoticeKind,
   notificationPrefs,
+  pushSubscriptions,
   type SmtpSettings,
   type TwilioSettings,
   users,
   workspaceMembers,
   workspaces,
 } from './db/schema';
+import { isGone, sendWebPush } from './webpush';
 
-// Alerts when a conversation needs someone. Admins set up the senders (ntfy push, email over
-// SMTP, Twilio texts, plus an optional shared team topic); each teammate picks which events reach
-// them and how. Best effort, and never in the way of handling the message.
+// Alerts when a conversation needs someone. Switchboard's own notifications need no setup (each
+// person turns them on per device); admins set up the other senders (ntfy push, email over SMTP,
+// Twilio texts, plus an optional shared team topic); each teammate picks which events reach them
+// and how. Best effort, and never in the way of handling the message.
 
 export type Notice = {
   workspaceId: string;
@@ -25,7 +28,7 @@ export type Notice = {
   channel: string;
   kind: NoticeKind;
   text?: string;
-  /** For "assigned": the teammate it's for. */
+  /** For "assigned" and "snooze": the teammate it's for. */
   userId?: string;
 };
 
@@ -38,18 +41,23 @@ export const NOTICE_INFO: Record<NoticeKind, { label: string; help: string }> = 
     label: 'Messages while the bot is paused',
     help: 'Someone wrote while the bot was paused for them.',
   },
+  snooze: { label: 'Back from snooze', help: 'A conversation you snoozed is back in the inbox.' },
 };
 
+/** Alerts meant for one teammate, not the whole team. */
+const PERSONAL: NoticeKind[] = ['assigned', 'snooze'];
+
 /**
- * What a teammate gets until they choose: what needs someone by push and email, the rest by push.
- * Never texts, which cost money per message.
+ * What a teammate gets until they choose: everything as a notification (on the devices they
+ * turned on) and by push, what needs someone by email too. Never texts, which cost money.
  */
 export const DEFAULT_EVENTS: Record<NoticeKind, AlertChannel[]> = {
-  handoff: ['push', 'email'],
-  assigned: ['push', 'email'],
-  team: ['push', 'email'],
-  unanswered: ['push'],
-  paused: ['push'],
+  handoff: ['browser', 'push', 'email'],
+  assigned: ['browser', 'push', 'email'],
+  team: ['browser', 'push', 'email'],
+  unanswered: ['browser', 'push'],
+  paused: ['browser', 'push'],
+  snooze: ['browser', 'push'],
 };
 
 /** One alert per contact and kind in this window, so a chatty conversation doesn't buzz nonstop. */
@@ -220,8 +228,23 @@ export async function recipients(db: Db, appSecret: string, workspaceId: string)
       ),
     )
     .where(eq(workspaceMembers.workspaceId, workspaceId));
+  const devices = rows.length
+    ? await db
+        .select()
+        .from(pushSubscriptions)
+        .where(
+          and(
+            eq(pushSubscriptions.workspaceId, workspaceId),
+            inArray(
+              pushSubscriptions.userId,
+              rows.map((r) => r.userId),
+            ),
+          ),
+        )
+    : [];
   return rows.map((r) => ({
     userId: r.userId,
+    devices: devices.filter((d) => d.userId === r.userId),
     push: r.pushUrl
       ? {
           url: r.pushUrl,
@@ -269,6 +292,7 @@ async function send(deps: Deps, n: Notice) {
     team: `About ${name}`,
     unanswered: `${name} sent a message`,
     assigned: `${name} is yours`,
+    snooze: `${name} is back from snooze`,
   }[n.kind];
   const text = (n.text || 'Open the inbox to see it.').slice(0, 300);
   const link = `${deps.publicUrl}/inbox/${n.contactId}`;
@@ -284,12 +308,21 @@ async function send(deps: Deps, n: Notice) {
       tags: [n.kind === 'handoff' ? 'raising_hand' : 'speech_balloon'],
     });
 
-  // The shared team topic hears everything but personal assignments.
-  if (from.team && n.kind !== 'assigned') jobs.push({ to: 'team topic', job: push(from.team) });
+  // The shared team topic hears everything but personal alerts.
+  const personal = PERSONAL.includes(n.kind);
+  if (from.team && !personal) jobs.push({ to: 'team topic', job: push(from.team) });
 
   for (const r of await recipients(deps.db, deps.appSecret, n.workspaceId)) {
-    if (n.kind === 'assigned' && r.userId !== n.userId) continue;
+    if (personal && r.userId !== n.userId) continue;
     const ways = r.events[n.kind] ?? [];
+    if (ways.includes('browser'))
+      for (const device of r.devices)
+        jobs.push({
+          to: 'notification',
+          job: notifyDevice(deps, device, { title, body: text, url: link, tag: n.contactId }).then(
+            () => {},
+          ),
+        });
     if (ways.includes('push') && r.push) jobs.push({ to: 'push', job: push(r.push) });
     if (ways.includes('email') && from.smtp && r.email)
       jobs.push({
@@ -310,6 +343,31 @@ async function send(deps: Deps, n: Notice) {
         error: r.reason instanceof Error ? r.reason.message : String(r.reason),
       });
   });
+}
+
+/**
+ * One device's notification. A device the push service says is gone is forgotten (and false
+ * comes back).
+ */
+export async function notifyDevice(
+  deps: Pick<Deps, 'db' | 'appSecret' | 'publicUrl'>,
+  device: typeof pushSubscriptions.$inferSelect,
+  message: { title: string; body: string; url: string; tag?: string },
+) {
+  try {
+    await sendWebPush(deps.appSecret, deps.publicUrl, device, message);
+  } catch (err) {
+    if (isGone(err)) {
+      await deps.db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, device.id));
+      return false;
+    }
+    throw err;
+  }
+  await deps.db
+    .update(pushSubscriptions)
+    .set({ lastSentAt: new Date() })
+    .where(eq(pushSubscriptions.id, device.id));
+  return true;
 }
 
 const escapeHtml = (s: string) =>

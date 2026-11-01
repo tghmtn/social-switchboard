@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { and, asc, eq, gt, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
@@ -9,6 +9,7 @@ import {
   invites,
   NOTICE_KINDS,
   notificationPrefs,
+  pushSubscriptions,
   users,
   workspaceMembers,
   workspaces,
@@ -17,6 +18,7 @@ import {
   alertEmail,
   DEFAULT_EVENTS,
   NOTICE_INFO,
+  notifyDevice,
   ntfyTarget,
   publish,
   recipients,
@@ -24,6 +26,7 @@ import {
   senders,
   sendSms,
 } from '../notify';
+import { deviceLabel, vapidKeys } from '../webpush';
 import { conflict, notFound, requireAdmin, requireWorkspace, who } from './guard';
 
 // Workspace settings: notifications (the senders, and each teammate's choices), and the team
@@ -58,11 +61,19 @@ export const workspaceRoutes =
         );
       return row;
     };
+    const myDevices = (workspaceId: string, userId: string) =>
+      db
+        .select()
+        .from(pushSubscriptions)
+        .where(
+          and(eq(pushSubscriptions.workspaceId, workspaceId), eq(pushSubscriptions.userId, userId)),
+        )
+        .orderBy(desc(pushSubscriptions.createdAt));
 
     /** Everything on the Notifications page: the senders, and this teammate's own choices. */
     app.get('/settings/notifications', async (req) => {
       const { user, workspace } = who(req);
-      const [[ws], mine, [account]] = await Promise.all([
+      const [[ws], mine, [account], devices] = await Promise.all([
         db
           .select({
             url: workspaces.notifyUrl,
@@ -76,6 +87,7 @@ export const workspaceRoutes =
           .where(eq(workspaces.id, workspace.id)),
         myPrefs(workspace.id, user.id),
         db.select({ email: users.email }).from(users).where(eq(users.id, user.id)),
+        myDevices(workspace.id, user.id),
       ]);
       return {
         /** The shared team topic: hears every alert but personal assignments. */
@@ -90,7 +102,17 @@ export const workspaceRoutes =
           accountEmail: account?.email ?? '',
           phone: mine?.phone ?? null,
           events: { ...DEFAULT_EVENTS, ...(mine?.events ?? {}) },
+          /** Browsers and installed apps with Switchboard's notifications turned on. */
+          devices: devices.map((d) => ({
+            id: d.id,
+            label: d.label,
+            endpoint: d.endpoint,
+            createdAt: d.createdAt,
+            lastSentAt: d.lastSentAt,
+          })),
         },
+        /** For turning notifications on in a browser (Web Push's application server key). */
+        vapidKey: vapidKeys(config.appSecret).publicKey,
         kinds: NOTICE_KINDS.map((id) => ({ id, ...NOTICE_INFO[id] })),
       };
     });
@@ -220,7 +242,10 @@ export const workspaceRoutes =
             .nullable()
             .optional(),
           events: z
-            .partialRecord(z.enum(NOTICE_KINDS), z.array(z.enum(ALERT_CHANNELS)).max(3))
+            .partialRecord(
+              z.enum(NOTICE_KINDS),
+              z.array(z.enum(ALERT_CHANNELS)).max(ALERT_CHANNELS.length),
+            )
             .optional(),
         })
         .parse(req.body);
@@ -252,6 +277,76 @@ export const workspaceRoutes =
       return { ok: true };
     });
 
+    /**
+     * Turns Switchboard's notifications on for this browser or installed app. A device that was
+     * someone else's (a shared computer) becomes yours. With your first device, every alert you
+     * chose to get some way also comes as a notification.
+     */
+    app.post('/settings/notifications/devices', async (req, reply) => {
+      const { user, workspace } = who(req);
+      const body = z
+        .object({
+          endpoint: z.url().max(2000).startsWith('https://'),
+          keys: z.object({
+            p256dh: z.string().min(16).max(200),
+            auth: z.string().min(8).max(100),
+          }),
+        })
+        .parse(req.body);
+      const before = await myDevices(workspace.id, user.id);
+      const values = {
+        workspaceId: workspace.id,
+        userId: user.id,
+        p256dh: body.keys.p256dh,
+        auth: body.keys.auth,
+        label: deviceLabel(req.headers['user-agent']),
+      };
+      const [row] = await db
+        .insert(pushSubscriptions)
+        .values({ ...values, endpoint: body.endpoint })
+        .onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: values })
+        .returning({ id: pushSubscriptions.id });
+      if (before.length === 0) {
+        const mine = await myPrefs(workspace.id, user.id);
+        if (mine?.events) {
+          const events = Object.fromEntries(
+            Object.entries(mine.events).map(([k, v]) => [
+              k,
+              v.length && !v.includes('browser') ? ['browser' as const, ...v] : v,
+            ]),
+          );
+          await db
+            .update(notificationPrefs)
+            .set({ events, updatedAt: new Date() })
+            .where(
+              and(
+                eq(notificationPrefs.workspaceId, workspace.id),
+                eq(notificationPrefs.userId, user.id),
+              ),
+            );
+        }
+      }
+      return reply.code(201).send({ id: row?.id });
+    });
+
+    /** Turns notifications off for one of your devices. */
+    app.delete('/settings/notifications/devices/:id', async (req) => {
+      const { user, workspace } = who(req);
+      const { id } = z.object({ id: z.uuid() }).parse(req.params);
+      const gone = await db
+        .delete(pushSubscriptions)
+        .where(
+          and(
+            eq(pushSubscriptions.id, id),
+            eq(pushSubscriptions.workspaceId, workspace.id),
+            eq(pushSubscriptions.userId, user.id),
+          ),
+        )
+        .returning({ id: pushSubscriptions.id });
+      if (gone.length === 0) throw notFound('Device');
+      return { ok: true };
+    });
+
     /** A saved secret, for the eye button: senders' for owners and admins, your own push token. */
     app.post('/settings/notifications/reveal', async (req, reply) => {
       const { which } = z
@@ -279,11 +374,11 @@ export const workspaceRoutes =
 
     /**
      * Sends a test so you can see it arrive (or why it doesn't): to the shared team topic
-     * (owners and admins), or to your own push topic, email or phone.
+     * (owners and admins), or to your own devices, push topic, email or phone.
      */
     app.post('/settings/notifications/test', async (req, reply) => {
       const { to } = z
-        .object({ to: z.enum(['team', 'push', 'email', 'sms']).default('team') })
+        .object({ to: z.enum(['team', 'browser', 'push', 'email', 'sms']).default('team') })
         .parse(req.body ?? {});
       const { user, workspace } = to === 'team' ? requireAdmin(req) : who(req);
       const from = await senders(db, config.appSecret, workspace.id);
@@ -300,6 +395,23 @@ export const workspaceRoutes =
         if (to === 'team') {
           if (!from.team) return reply.code(409).send({ error: 'Save an ntfy topic URL first.' });
           await publish(from.team, message);
+        } else if (to === 'browser') {
+          if (!me?.devices.length)
+            return reply.code(409).send({ error: 'Turn notifications on for this device first.' });
+          const sent = await Promise.all(
+            me.devices.map((d) =>
+              notifyDevice({ db, appSecret: config.appSecret, publicUrl: config.publicUrl }, d, {
+                title: message.title,
+                body: message.text,
+                url: message.click,
+                tag: 'test',
+              }),
+            ),
+          );
+          if (!sent.includes(true))
+            return reply.code(409).send({
+              error: 'Your devices no longer accept notifications. Turn them on again.',
+            });
         } else if (to === 'push') {
           if (!me?.push) return reply.code(409).send({ error: 'Save your push topic first.' });
           await publish(me.push, message);
