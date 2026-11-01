@@ -48,67 +48,148 @@ const CHANNELS: { id: Channel; label: string }[] = [
   { id: 'sms', label: 'Text' },
 ];
 
-/** Common SMTP services; picking one fills in the server settings. */
-const PRESETS: {
+type Security = 'tls' | 'starttls' | 'none';
+type ServiceId =
+  | 'resend'
+  | 'sendgrid'
+  | 'postmark'
+  | 'ses'
+  | 'mailgun'
+  | 'gmail'
+  | 'microsoft'
+  | 'other';
+
+/**
+ * Email services we know. Each asks only for what it needs (often one API key); its server
+ * settings fill themselves in and stay folded away.
+ */
+const SERVICES: {
+  id: ServiceId;
   name: string;
   host: string;
   port: number;
-  security: 'tls' | 'starttls';
+  security: Security;
+  /** A fixed username, for services where the key does the work. */
   user?: string;
-  note: string;
+  /** Otherwise, what the person types as the username. */
+  userLabel?: string;
+  userPlaceholder?: string;
+  secretLabel: string;
+  /** Mailbox services send as the account itself, so there's no separate From address. */
+  sendsAsUser?: boolean;
+  /** Where the credentials come from, and what's easy to get wrong. */
+  steps: string;
+  link?: { href: string; label: string };
 }[] = [
   {
-    name: 'Gmail / Google Workspace',
-    host: 'smtp.gmail.com',
-    port: 587,
-    security: 'starttls',
-    note: 'Use an app password (Google Account → Security → App passwords), not your normal one.',
-  },
-  {
-    name: 'Microsoft 365 / Outlook',
-    host: 'smtp.office365.com',
-    port: 587,
-    security: 'starttls',
-    note: 'Your admin may need to allow SMTP sign-in for the mailbox.',
-  },
-  {
-    name: 'Amazon SES',
-    host: 'email-smtp.us-east-1.amazonaws.com',
-    port: 587,
-    security: 'starttls',
-    note: 'Change the region in the server name to yours, and use SES SMTP credentials.',
-  },
-  {
-    name: 'Postmark',
-    host: 'smtp.postmarkapp.com',
-    port: 587,
-    security: 'starttls',
-    note: 'The username and password are both your server API token.',
-  },
-  {
+    id: 'resend',
     name: 'Resend',
     host: 'smtp.resend.com',
     port: 465,
     security: 'tls',
     user: 'resend',
-    note: 'The password is your Resend API key.',
+    secretLabel: 'API key',
+    steps:
+      'In Resend, open API Keys → Create API Key with “Sending access”. The From address has to be on a domain that shows Verified under Domains.',
+    link: { href: 'https://resend.com/api-keys', label: 'Open Resend API keys' },
   },
   {
+    id: 'sendgrid',
     name: 'SendGrid',
     host: 'smtp.sendgrid.net',
     port: 587,
     security: 'starttls',
     user: 'apikey',
-    note: 'The password is your SendGrid API key.',
+    secretLabel: 'API key',
+    steps:
+      'In SendGrid, Settings → API Keys → Create API Key (“Mail Send” is enough). The From address has to be a verified sender or on an authenticated domain.',
+    link: { href: 'https://app.sendgrid.com/settings/api_keys', label: 'Open SendGrid API keys' },
   },
   {
+    id: 'postmark',
+    name: 'Postmark',
+    host: 'smtp.postmarkapp.com',
+    port: 587,
+    security: 'starttls',
+    userLabel: 'Access key',
+    secretLabel: 'Secret key',
+    steps:
+      'In Postmark, open your server → Settings → SMTP → Generate an SMTP token, and copy its access key and secret key. The From address has to be a confirmed sender signature or domain.',
+  },
+  {
+    id: 'ses',
+    name: 'Amazon SES',
+    host: 'email-smtp.us-east-1.amazonaws.com',
+    port: 587,
+    security: 'starttls',
+    userLabel: 'SMTP username',
+    secretLabel: 'SMTP password',
+    steps:
+      'In the SES console, SMTP settings → Create SMTP credentials (these aren’t your AWS access keys). The region is the one your SES account sends from.',
+  },
+  {
+    id: 'mailgun',
     name: 'Mailgun',
     host: 'smtp.mailgun.org',
     port: 587,
     security: 'starttls',
-    note: 'Use the SMTP credentials from your Mailgun domain.',
+    userLabel: 'SMTP login',
+    userPlaceholder: 'postmaster@mg.yourdomain.com',
+    secretLabel: 'SMTP password',
+    steps:
+      'In Mailgun, Sending → Domain settings → SMTP credentials. Accounts in the EU region use smtp.eu.mailgun.org (under Server settings).',
+  },
+  {
+    id: 'gmail',
+    name: 'Gmail or Google Workspace',
+    host: 'smtp.gmail.com',
+    port: 587,
+    security: 'starttls',
+    userLabel: 'Gmail address',
+    userPlaceholder: 'you@gmail.com',
+    secretLabel: 'App password',
+    sendsAsUser: true,
+    steps:
+      'Use an app password, not your normal one: Google Account → Security → 2-Step Verification → App passwords. Alerts come from this address.',
+    link: { href: 'https://myaccount.google.com/apppasswords', label: 'Open Google app passwords' },
+  },
+  {
+    id: 'microsoft',
+    name: 'Microsoft 365 or Outlook',
+    host: 'smtp.office365.com',
+    port: 587,
+    security: 'starttls',
+    userLabel: 'Mailbox address',
+    secretLabel: 'Password',
+    sendsAsUser: true,
+    steps:
+      'Your admin has to turn on “Authenticated SMTP” for the mailbox, and Microsoft is phasing out password sign-in for it, so a sending service like Resend lasts longer.',
+  },
+  {
+    id: 'other',
+    name: 'Another SMTP server',
+    host: '',
+    port: 587,
+    security: 'starttls',
+    userLabel: 'Username',
+    secretLabel: 'Password',
+    steps:
+      'Any email service or server with SMTP. Its help pages list the server, port and security.',
   },
 ];
+
+const SES_HOST = /^email-smtp\.([a-z0-9-]+)\.amazonaws\.com$/;
+
+/** "API key" stays as it is; "App password" reads "app password" mid-sentence. */
+const inSentence = (label: string) =>
+  /^[A-Z]{2}/.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1);
+
+/** Which service a saved server belongs to. */
+function serviceOf(host: string): ServiceId {
+  if (SES_HOST.test(host)) return 'ses';
+  if (/(^|\.)mailgun\.org$/.test(host)) return 'mailgun';
+  return SERVICES.find((x) => x.host && x.host === host)?.id ?? 'other';
+}
 
 const errorText = (err: unknown, fallback: string) =>
   err instanceof ApiError
@@ -630,20 +711,45 @@ function EmailSender({
   reload: () => Promise<void>;
 }) {
   const saved = s.email;
+  const savedService = saved ? serviceOf(saved.host) : undefined;
+  const [service, setService] = useState<ServiceId | ''>(savedService ?? '');
   const [host, setHost] = useState(saved?.host ?? '');
   const [port, setPort] = useState(String(saved?.port ?? 587));
-  const [security, setSecurity] = useState(saved?.security ?? 'starttls');
+  const [security, setSecurity] = useState<Security>(saved?.security ?? 'starttls');
   const [user, setUser] = useState(saved?.user ?? '');
-  const [note, setNote] = useState<string>();
   const [message, setMessage] = useState<Message>();
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const svc = SERVICES.find((x) => x.id === service);
+  // The saved secret belongs to the saved service; another service needs its own.
+  const hasSecret = Boolean(saved?.hasPassword) && service === savedService;
+
+  function pick(id: ServiceId | '') {
+    setService(id);
+    setErrors({});
+    setMessage(undefined);
+    const next = SERVICES.find((x) => x.id === id);
+    if (!next) return;
+    // Back to the saved service: its saved settings. Otherwise that service's own.
+    const was = id === savedService ? saved : null;
+    setHost(was ? was.host : next.host);
+    setPort(String(was ? was.port : next.port));
+    setSecurity(was ? was.security : next.security);
+    setUser(next.user ?? was?.user ?? '');
+  }
 
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!svc) return;
     const form = new FormData(e.currentTarget);
-    const password = String(form.get('password') ?? '');
+    const password = String(form.get('password') ?? '').trim();
     setMessage(undefined);
     setErrors({});
+    if (!password && !hasSecret) {
+      setErrors({ password: `Paste the ${inSentence(svc.secretLabel)}.` });
+      return;
+    }
+    setBusy(true);
     try {
       await api(
         '/settings/notifications/email',
@@ -653,121 +759,229 @@ function EmailSender({
           security,
           user: user.trim(),
           ...(password && { password }),
-          from: String(form.get('from') ?? '').trim(),
+          from: svc.sendsAsUser ? user.trim() : String(form.get('from') ?? '').trim(),
           fromName: String(form.get('fromName') ?? '').trim() || 'Social Switchboard',
         },
         'PUT',
       );
       await reload();
-      setMessage({ ok: true, text: 'Saved. “Test email” in My alerts sends you one.' });
+      setMessage({ ok: true, text: 'Saved. Send yourself a test to check it.' });
     } catch (err) {
-      if (err instanceof ApiError) setErrors(err.fieldErrors());
+      if (err instanceof ApiError) {
+        const fields = err.fieldErrors();
+        // A mailbox service sends as the username, so a bad From address is the username.
+        if (svc.sendsAsUser && fields.from) fields.user = fields.from;
+        setErrors(fields);
+      }
       setMessage({ ok: false, text: errorText(err, 'Couldn’t save.') });
+    } finally {
+      setBusy(false);
     }
   }
 
+  async function test() {
+    setMessage(undefined);
+    setBusy(true);
+    try {
+      await api('/settings/notifications/test', { to: 'email' });
+      setMessage({
+        ok: true,
+        text: `Sent to ${s.mine.email || s.mine.accountEmail}. Check spam the first time.`,
+      });
+    } catch (err) {
+      const text = errorText(err, 'The test didn’t go through.');
+      // SMTP's "535" is a refused sign-in: almost always the key or password.
+      setMessage({
+        ok: false,
+        text:
+          svc && /\b535\b|invalid login|authentication/i.test(text)
+            ? `${svc.name} didn’t accept the ${inSentence(svc.secretLabel)}. Check it, or make a new one and paste it with Replace. (${text})`
+            : text,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const serverFields = (
+    <>
+      <div className="grid gap-3 sm:grid-cols-[1fr_7rem]">
+        <Field
+          label="Server"
+          value={host}
+          onChange={(e) => setHost(e.target.value)}
+          placeholder="smtp.example.com"
+          error={errors.host}
+        />
+        <Field
+          label="Port"
+          inputMode="numeric"
+          value={port}
+          onChange={(e) => setPort(e.target.value)}
+          error={errors.port}
+        />
+      </div>
+      <Select
+        label="Security"
+        value={security}
+        onChange={(e) => setSecurity(e.target.value as Security)}
+      >
+        <option value="starttls">STARTTLS (usually port 587)</option>
+        <option value="tls">TLS from the start (usually port 465)</option>
+        <option value="none">None (only for a server on your own network)</option>
+      </Select>
+    </>
+  );
+
   return (
-    <SenderCard title="Email (SMTP)" status={saved ? 'Set up' : 'Not set up'} ok={Boolean(saved)}>
-      <p className="text-[14px] text-muted">
-        Alerts go out through any email service that offers SMTP. Use an address on your own domain
-        if you can, so alerts don’t land in spam.
-      </p>
+    <SenderCard
+      title="Email"
+      status={
+        saved ? (SERVICES.find((x) => x.id === savedService)?.name ?? 'Set up') : 'Not set up'
+      }
+      ok={Boolean(saved)}
+    >
       {isAdmin ? (
-        <form onSubmit={save} className="grid gap-3" autoComplete="off">
+        <form onSubmit={save} className="grid gap-4" autoComplete="off">
           <Select
-            label="Service"
-            value=""
-            onChange={(e) => {
-              const p = PRESETS.find((x) => x.name === e.target.value);
-              if (!p) return;
-              setHost(p.host);
-              setPort(String(p.port));
-              setSecurity(p.security);
-              if (p.user) setUser(p.user);
-              setNote(p.note);
-            }}
-            hint={note}
+            label="Which service do you send email with?"
+            value={service}
+            onChange={(e) => pick(e.target.value as ServiceId | '')}
           >
-            <option value="">Fill in from a common service…</option>
-            {PRESETS.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
+            <option value="">Choose one…</option>
+            {SERVICES.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
               </option>
             ))}
           </Select>
-          <div className="grid gap-3 sm:grid-cols-[1fr_7rem]">
-            <Field
-              label="Server"
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
-              placeholder="smtp.example.com"
-              error={errors.host}
-            />
-            <Field
-              label="Port"
-              inputMode="numeric"
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              error={errors.port}
-            />
-          </div>
-          <Select
-            label="Security"
-            value={security}
-            onChange={(e) => setSecurity(e.target.value as typeof security)}
-          >
-            <option value="starttls">STARTTLS (usually port 587)</option>
-            <option value="tls">TLS from the start (usually port 465)</option>
-            <option value="none">None (only for a server on your own network)</option>
-          </Select>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
-              label="Username"
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              error={errors.user}
-            />
-            <SecretField
-              label="Password"
-              name="password"
-              saved={Boolean(saved?.hasPassword)}
-              hint={saved?.hasPassword ? 'Saved and encrypted.' : undefined}
-              reveal={reveal('email')}
-            />
-            <Field
-              label="From address"
-              name="from"
-              type="email"
-              defaultValue={saved?.from ?? ''}
-              placeholder="alerts@yourdomain.com"
-              error={errors.from}
-            />
-            <Field
-              label="From name"
-              name="fromName"
-              defaultValue={saved?.fromName ?? 'Social Switchboard'}
-              error={errors.fromName}
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" className="btn btn-primary">
-              Save
-            </button>
-            {saved && (
-              <button
-                type="button"
-                className="linkbtn text-danger"
-                onClick={async () => {
-                  if (!confirm('Turn off email alerts for everyone?')) return;
-                  await api('/settings/notifications/email', undefined, 'DELETE');
-                  await reload();
-                }}
-              >
-                Remove
-              </button>
-            )}
-          </div>
-          <Result message={message} />
+          {!svc && (
+            <p className="text-[14px] text-muted">
+              Alerts go out through an email service you already use. A sending service like Resend
+              or SendGrid needs just an API key; use an address on your own domain so alerts don’t
+              land in spam.
+            </p>
+          )}
+
+          {svc && (
+            <>
+              <div className="grid gap-1.5 border-l-4 border-primary bg-surface-2 px-3 py-2.5 text-[14px]">
+                <p>{svc.steps}</p>
+                {svc.link && (
+                  <a
+                    href={svc.link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-fit"
+                  >
+                    {svc.link.label} ↗
+                  </a>
+                )}
+              </div>
+
+              {svc.id === 'ses' && (
+                <Field
+                  label="Region"
+                  value={SES_HOST.exec(host)?.[1] ?? ''}
+                  onChange={(e) =>
+                    setHost(`email-smtp.${e.target.value.trim().toLowerCase()}.amazonaws.com`)
+                  }
+                  placeholder="us-east-1"
+                  hint="Like us-east-1 or eu-west-1."
+                  error={errors.host}
+                />
+              )}
+              {svc.id === 'other' && serverFields}
+              {!svc.user && (
+                <Field
+                  label={svc.userLabel ?? 'Username'}
+                  type={svc.sendsAsUser ? 'email' : 'text'}
+                  value={user}
+                  onChange={(e) => setUser(e.target.value)}
+                  placeholder={svc.userPlaceholder}
+                  error={errors.user}
+                />
+              )}
+              <SecretField
+                key={service}
+                label={svc.secretLabel}
+                name="password"
+                saved={hasSecret}
+                hint={hasSecret ? 'Saved and encrypted.' : undefined}
+                error={errors.password}
+                reveal={reveal('email')}
+              />
+              <div className="grid items-start gap-3 sm:grid-cols-2">
+                {!svc.sendsAsUser && (
+                  <Field
+                    label="Send alerts from"
+                    name="from"
+                    type="email"
+                    defaultValue={saved?.from ?? ''}
+                    placeholder="noreply@yourdomain.com"
+                    error={errors.from}
+                  />
+                )}
+                <Field
+                  label="Sender name"
+                  name="fromName"
+                  defaultValue={saved?.fromName ?? 'Social Switchboard'}
+                  hint="What inboxes show as who it’s from."
+                  error={errors.fromName}
+                />
+              </div>
+              {svc.id !== 'other' && (
+                <details className="group/server">
+                  <summary className="w-fit cursor-pointer list-none text-[14px] font-bold text-muted">
+                    <span
+                      className="inline-block transition-transform group-open/server:rotate-90"
+                      aria-hidden
+                    >
+                      ›
+                    </span>{' '}
+                    Server settings
+                  </summary>
+                  <div className="mt-3 grid gap-3">
+                    {serverFields}
+                    {svc.user && (
+                      <Field
+                        label="Username"
+                        value={user}
+                        onChange={(e) => setUser(e.target.value)}
+                        error={errors.user}
+                      />
+                    )}
+                  </div>
+                </details>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="submit" className="btn btn-primary" disabled={busy}>
+                  Save
+                </button>
+                {saved && service === savedService && (
+                  <button type="button" className="btn" disabled={busy} onClick={() => void test()}>
+                    Send me a test
+                  </button>
+                )}
+                {saved && (
+                  <button
+                    type="button"
+                    className="linkbtn ml-auto text-danger"
+                    onClick={async () => {
+                      if (!confirm('Turn off email alerts for everyone?')) return;
+                      await api('/settings/notifications/email', undefined, 'DELETE');
+                      pick('');
+                      await reload();
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <Result message={message} />
+            </>
+          )}
         </form>
       ) : (
         <p className="text-[14px]">
