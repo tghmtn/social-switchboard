@@ -31,6 +31,8 @@ function waitText(r: SimRun) {
     : '';
   if (r.waitKind === 'delay') return `Delay until ${when}`;
   if (r.waitKind === 'choice') return 'Waiting for a tap or reply';
+  if (r.waitKind === 'ai') return 'AI conversation: waiting for a reply';
+  if (r.waitKind === 'route') return 'AI is sorting their message';
   return 'Waiting for an answer';
 }
 

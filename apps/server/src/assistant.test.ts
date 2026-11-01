@@ -407,6 +407,92 @@ describe.skipIf(!databaseUrl)('assistant', () => {
     expect(out[0]?.content.privateReplyTo).toEqual(expect.any(String));
   });
 
+  describe('AI sort steps', () => {
+    const sortFlow = async () => {
+      const flowId = (await call<{ flow: { id: string } }>('POST', '/api/flows', { name: 'Sort' }))
+        .body.flow.id;
+      const text = (t: string) => ({ parts: [{ type: 'text', text: t }] });
+      const saved = await call<{ issues: unknown[] }>('PUT', `/api/flows/${flowId}/draft`, {
+        graph: {
+          nodes: [
+            { id: 'start', type: 'start' },
+            {
+              id: 'sort',
+              type: 'ai_route',
+              data: {
+                intents: [
+                  { id: 'pricing', label: 'Pricing', description: 'asks what it costs' },
+                  { id: 'booking', label: 'Booking' },
+                ],
+                saveTo: 'topic',
+              },
+            },
+            { id: 'prices', type: 'message', data: text('Classes are $40.') },
+            { id: 'other', type: 'message', data: text('Tell me more?') },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', sourceHandle: 'next', target: 'sort' },
+            { id: 'e2', source: 'sort', sourceHandle: 'pricing', target: 'prices' },
+            { id: 'e3', source: 'sort', sourceHandle: 'else', target: 'other' },
+          ],
+        },
+      });
+      expect(saved.body.issues).toEqual([]);
+      return flowId;
+    };
+    type Sim = {
+      contact: { fields: Record<string, unknown> } | null;
+      messages: {
+        direction: string;
+        content: { privateReplyTo?: string; message?: { parts: { text?: string }[] } };
+      }[];
+    };
+    const said = (s: Sim) =>
+      s.messages.flatMap((m) =>
+        m.direction === 'out' ? (m.content.message?.parts ?? []).map((p) => p.text) : [],
+      );
+
+    it('sorts the comment that started a flow, answers in the private reply, and saves the pick', async () => {
+      await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+      const flowId = await sortFlow();
+      await call('POST', `/api/flows/${flowId}/publish`, {});
+      await call('POST', '/api/triggers', { flowId, config: { type: 'comment' } });
+      script = [reply([{ type: 'text', text: JSON.stringify({ intent: 'pricing' }) }])];
+      const sim = (await call<Sim>('POST', '/api/simulator/comment', { text: 'how much is it?' }))
+        .body;
+      expect(said(sim)).toEqual(['Classes are $40.']);
+      expect(sim.messages.find((m) => m.direction === 'out')?.content.privateReplyTo).toEqual(
+        expect.any(String),
+      );
+      expect(sim.contact?.fields.topic).toBe('Pricing');
+      expect(requests[0]).toMatchObject({
+        output_config: {
+          effort: 'low',
+          format: {
+            schema: { properties: { intent: { enum: ['pricing', 'booking', 'none'] } } },
+          },
+        },
+      });
+      expect(JSON.stringify(requests[0])).toContain('Their latest message: how much is it?');
+    });
+
+    it('goes through "else" for "none", and without a key never calls the AI', async () => {
+      const flowId = await sortFlow();
+      let sim = (await call<Sim>('POST', '/api/simulator/start', { flowId, version: 'draft' }))
+        .body;
+      expect(said(sim)).toEqual(['Tell me more?']);
+      expect(requests).toEqual([]);
+
+      await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+      await call('POST', `/api/flows/${flowId}/publish`, {});
+      await call('POST', '/api/triggers', { flowId, config: { type: 'default_reply' } });
+      script = [reply([{ type: 'text', text: JSON.stringify({ intent: 'none' }) }])];
+      sim = (await call<Sim>('POST', '/api/simulator/send', { text: 'love your work!' })).body;
+      expect(said(sim).at(-1)).toBe('Tell me more?');
+      expect(sim.contact?.fields).not.toHaveProperty('topic');
+    });
+  });
+
   it('needs a key before it can start', async () => {
     const thread = (await call<View>('POST', '/api/assistant/threads')).body;
     const res = await call('POST', `/api/assistant/threads/${thread.id}/messages`, { text: 'Hi' });

@@ -48,6 +48,8 @@ export type RuntimeDeps = {
   notify?: (n: Notice) => void;
   /** An AI step's next turn (see ai/flow-step.ts). Without it, AI steps hand off to a person. */
   aiTurn?: (t: AiTurn) => Promise<AiTurnResult>;
+  /** An AI sort step's pick (see ai/flow-step.ts). Without it, sorts go through "else". */
+  aiRoute?: (t: AiRoute) => Promise<{ intent?: string }>;
 };
 
 export type AiTurn = {
@@ -62,6 +64,10 @@ export type AiTurn = {
   commentId?: string;
 };
 export type AiTurnResult = Omit<Extract<EngineEvent, { type: 'ai_result' }>, 'type' | 'token'>;
+/** An AI sort step reading their latest message. `commentId`: what it leads to may use the reply. */
+export type AiRoute = Omit<AiTurn, 'turns'>;
+/** AI work found during a transaction, done once it commits. */
+type AiJob = ({ kind: 'turn' } & AiTurn) | ({ kind: 'route' } & AiRoute);
 
 const notifyAll = (deps: RuntimeDeps, notices: Notice[]) => {
   for (const n of notices) deps.notify?.(n);
@@ -107,8 +113,8 @@ type Ctx = {
   queued: string[];
   /** Push notifications to send once the transaction commits. */
   notices: Notice[];
-  /** AI step turns to take once the transaction commits. */
-  aiTurns: AiTurn[];
+  /** AI step turns and sorts to run once the transaction commits. */
+  aiJobs: AiJob[];
   /** How many "go to flow" hops this event has taken, to stop flows that call each other forever. */
   hops: number;
   /** Set when a comment started this: the first message is the comment's one private reply. */
@@ -116,8 +122,9 @@ type Ctx = {
 };
 
 const MAX_FLOW_HOPS = 5;
-// Waits a fresh message can answer: a question, a choice, or an AI step's conversation.
-const CONVERSATION_WAITS = ['input', 'choice', 'ai'];
+// Waits a fresh message can answer: a question, a choice, an AI step's conversation, or an AI
+// sort still reading (the message joins what it reads).
+const CONVERSATION_WAITS = ['input', 'choice', 'ai', 'route'];
 
 // Payloads ride along on quick replies and flow buttons and come back when they're tapped.
 const PAYLOAD_VERSION = 'ssw1';
@@ -134,7 +141,7 @@ export function decodePayload(payload: string) {
 export async function receive(deps: RuntimeDeps, input: Inbound) {
   const queued: string[] = [];
   const notices: Notice[] = [];
-  const aiTurns: AiTurn[] = [];
+  const aiJobs: AiJob[] = [];
   const contactId = await deps.db.transaction(async (tx) => {
     const { contactId, isNew } = await findOrCreateContact(
       tx,
@@ -179,14 +186,14 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
       now,
       queued,
       notices,
-      aiTurns,
+      aiJobs,
     );
     await route(ctx, input, isNew);
     return contactId;
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
-  await runAiTurns(deps, aiTurns);
+  await runAiJobs(deps, aiJobs);
   return { contactId };
 }
 
@@ -197,7 +204,7 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
 export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
   const queued: string[] = [];
   const notices: Notice[] = [];
-  const aiTurns: AiTurn[] = [];
+  const aiJobs: AiJob[] = [];
   const result = await deps.db.transaction(async (tx) => {
     const { contactId } = await findOrCreateContact(
       tx,
@@ -268,7 +275,7 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
       now,
       queued,
       notices,
-      aiTurns,
+      aiJobs,
     );
     ctx.commentReply = { commentId: input.commentId, used: false };
     await cancelConversationRuns(ctx);
@@ -303,7 +310,7 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
-  await runAiTurns(deps, aiTurns);
+  await runAiJobs(deps, aiJobs);
   return result;
 }
 
@@ -385,7 +392,7 @@ export async function startFlow(
 ) {
   const queued: string[] = [];
   const notices: Notice[] = [];
-  const aiTurns: AiTurn[] = [];
+  const aiJobs: AiJob[] = [];
   const runId = await deps.db.transaction(async (tx) => {
     await lockContact(tx, args.contactId);
     const ctx = await context(
@@ -397,7 +404,7 @@ export async function startFlow(
       deps.now?.() ?? new Date(),
       queued,
       notices,
-      aiTurns,
+      aiJobs,
     );
     const version = await loadVersion(tx, args.workspaceId, args.versionId);
     if (!version) throw new Error(`flow version ${args.versionId} not found`);
@@ -406,41 +413,47 @@ export async function startFlow(
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
-  await runAiTurns(deps, aiTurns);
+  await runAiJobs(deps, aiJobs);
   return runId;
 }
 
 /**
- * Takes AI step turns: asks the AI (outside any transaction, it can take seconds), then feeds the
- * answer to the run like a timer firing. An answer can lead to further turns; at most 10 here.
+ * Runs AI step turns and sorts: asks the AI (outside any transaction, it can take seconds), then
+ * feeds the answer to the run like a timer firing. An answer can lead to more AI work; at most
+ * 10 jobs here.
  */
-async function runAiTurns(deps: RuntimeDeps, turns: AiTurn[]) {
-  for (let i = 0; i < turns.length && i < 10; i++) {
-    const t = turns[i] as AiTurn;
-    let result: AiTurnResult = { outcome: 'handoff' };
-    if (deps.aiTurn) {
-      try {
-        result = await deps.aiTurn(t);
-      } catch (err) {
-        deps.log?.('AI step failed: handing off', {
-          runId: t.runId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+async function runAiJobs(deps: RuntimeDeps, jobs: AiJob[]) {
+  for (let i = 0; i < jobs.length && i < 10; i++) {
+    const job = jobs[i] as AiJob;
+    // Without the hook, or when it fails, a turn hands off and a sort goes through "else".
+    let event: EngineEvent =
+      job.kind === 'turn'
+        ? { type: 'ai_result', token: job.token, outcome: 'handoff' }
+        : { type: 'ai_route_result', token: job.token };
+    try {
+      if (job.kind === 'turn' && deps.aiTurn)
+        event = { type: 'ai_result', token: job.token, ...(await deps.aiTurn(job)) };
+      if (job.kind === 'route' && deps.aiRoute)
+        event = { type: 'ai_route_result', token: job.token, ...(await deps.aiRoute(job)) };
+    } catch (err) {
+      deps.log?.(job.kind === 'turn' ? 'AI step failed: handing off' : 'AI sort failed: no match', {
+        runId: job.runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-    turns.push(...(await answerAi(deps, t, result)));
+    jobs.push(...(await answerAi(deps, job, event)));
   }
 }
 
-async function answerAi(deps: RuntimeDeps, t: AiTurn, result: AiTurnResult) {
+async function answerAi(deps: RuntimeDeps, job: AiJob, event: EngineEvent) {
   const queued: string[] = [];
   const notices: Notice[] = [];
-  const aiTurns: AiTurn[] = [];
+  const aiJobs: AiJob[] = [];
   await deps.db.transaction(async (tx) => {
-    await lockContact(tx, t.contactId);
-    const [run] = await tx.select().from(runs).where(eq(runs.id, t.runId));
+    await lockContact(tx, job.contactId);
+    const [run] = await tx.select().from(runs).where(eq(runs.id, job.runId));
     // The run moved on meanwhile (cancelled, timed out, a person took over): drop the answer.
-    if (run?.status !== 'waiting' || run.wakeToken !== t.token) return;
+    if (run?.status !== 'waiting' || run.wakeToken !== job.token) return;
     const ctx = await context(
       deps,
       tx,
@@ -450,21 +463,21 @@ async function answerAi(deps: RuntimeDeps, t: AiTurn, result: AiTurnResult) {
       deps.now?.() ?? new Date(),
       queued,
       notices,
-      aiTurns,
+      aiJobs,
     );
-    if (t.commentId) ctx.commentReply = { commentId: t.commentId, used: false };
-    await step(ctx, run, { type: 'ai_result', token: t.token, ...result });
+    if (job.commentId) ctx.commentReply = { commentId: job.commentId, used: false };
+    await step(ctx, run, event);
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
-  return aiTurns;
+  return aiJobs;
 }
 
 /** Fires a due delay or reply timeout. Stale tokens (the run already moved on) are ignored. */
 export async function wake(deps: RuntimeDeps, runId: string, token: string) {
   const queued: string[] = [];
   const notices: Notice[] = [];
-  const aiTurns: AiTurn[] = [];
+  const aiJobs: AiJob[] = [];
   await deps.db.transaction(async (tx) => {
     const [peek] = await tx
       .select({ contactId: runs.contactId })
@@ -495,13 +508,13 @@ export async function wake(deps: RuntimeDeps, runId: string, token: string) {
       now,
       queued,
       notices,
-      aiTurns,
+      aiJobs,
     );
     await step(ctx, run, { type: 'wake', token });
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
-  await runAiTurns(deps, aiTurns);
+  await runAiJobs(deps, aiJobs);
 }
 
 /** Wakes every run whose delay or timeout is due. Returns how many it looked at. */
@@ -602,7 +615,7 @@ async function context(
   now: Date,
   queued: string[],
   notices: Notice[],
-  aiTurns: AiTurn[],
+  aiJobs: AiJob[],
 ): Promise<Ctx> {
   const [ws] = await tx
     .select({ timeZone: workspaces.timeZone })
@@ -618,7 +631,7 @@ async function context(
     now,
     queued,
     notices,
-    aiTurns,
+    aiJobs,
     hops: 0,
   };
 }
@@ -852,22 +865,27 @@ async function persist(
       case 'start_flow':
         nextFlows.push(e.flowId);
         break;
-      case 'ai_turn': {
+      case 'ai_turn':
+      case 'ai_route': {
         const wait = result.state.wait;
-        if (wait?.kind !== 'ai') break;
-        // Keep the comment's private reply for the AI's answer, which comes after this commits.
+        if (wait?.kind !== 'ai' && wait?.kind !== 'route') break;
+        // Keep the comment's private reply for what follows the AI's answer, after this commits.
         const reply = ctx.commentReply;
         const commentId = reply && !reply.used ? reply.commentId : undefined;
         if (reply) reply.used = true;
-        ctx.aiTurns.push({
+        const job = {
           workspaceId,
           contactId,
           runId: run.id,
           nodeId: e.nodeId,
           token: wait.token,
-          turns: wait.turns,
           commentId,
-        });
+        };
+        ctx.aiJobs.push(
+          wait.kind === 'ai'
+            ? { kind: 'turn', ...job, turns: wait.turns }
+            : { kind: 'route', ...job },
+        );
         break;
       }
     }

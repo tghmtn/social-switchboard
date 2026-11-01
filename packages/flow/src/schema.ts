@@ -218,6 +218,29 @@ export const flowNode = z.discriminatedUnion('type', [
       timeoutHours,
     }),
   }),
+  /**
+   * Sorts their latest message by what it's asking for, using AI. Leaves through the matching
+   * intent's id, or "else" when none fits (or there's no AI key, or no message to read).
+   */
+  z.object({
+    ...base,
+    type: z.literal('ai_route'),
+    data: z.object({
+      intents: z
+        .array(
+          z.object({
+            id,
+            label: z.string().trim().min(1).max(40),
+            /** What a message like this looks like, in the business's words. */
+            description: z.string().trim().max(300).default(''),
+          }),
+        )
+        .min(1)
+        .max(10),
+      /** Saves the matched intent's label into this contact field. */
+      saveTo: fieldKey.optional(),
+    }),
+  }),
 ]);
 
 // Edge ids never leave the graph, so any reasonable string will do (React Flow makes its own).

@@ -159,6 +159,9 @@ export function Inspector({
     case 'ai':
       body = <AiForm step={step} onChange={onChange} ctx={ctx} />;
       break;
+    case 'ai_route':
+      body = <AiRouteForm step={step} onChange={onChange} ctx={ctx} />;
+      break;
     case 'start':
       break;
   }
@@ -511,6 +514,69 @@ function AiForm({ step, onChange, ctx }: Props<'ai'> & { ctx: Ctx }) {
           onChange={(e) => set({ timeoutHours: num(e.target.value, d.timeoutHours) })}
         />
       </div>
+    </>
+  );
+}
+
+function AiRouteForm({ step, onChange, ctx }: Props<'ai_route'> & { ctx: Ctx }) {
+  const d = step.data;
+  const set = (data: Partial<typeof d>) => onChange({ ...step, data: { ...d, ...data } });
+  const setIntent = (i: number, change: Partial<(typeof d.intents)[number]>) =>
+    set({ intents: d.intents.map((x, j) => (j === i ? { ...x, ...change } : x)) });
+  return (
+    <>
+      <p className="text-[14px] text-muted">
+        The workspace’s AI (Settings → AI) reads their latest message, or the comment that started
+        the flow, and sends them down the path that fits by meaning, not exact words. Anything that
+        fits none of them, or a missing AI key, goes to “None of these”.
+      </p>
+      {d.intents.map((x, i) => (
+        <div key={x.id} className="grid grid-cols-[1fr_1.4fr_auto] items-end gap-2">
+          <Field
+            label="Path"
+            value={x.label}
+            maxLength={40}
+            onChange={(e) => setIntent(i, { label: e.target.value })}
+          />
+          <Field
+            label="Messages like"
+            value={x.description}
+            maxLength={300}
+            placeholder="asks what something costs"
+            onChange={(e) => setIntent(i, { description: e.target.value })}
+          />
+          <div className="pb-3">
+            {d.intents.length > 1 && (
+              <Remove
+                label={`Remove path ${x.label}`}
+                onClick={() => set({ intents: d.intents.filter((_, j) => j !== i) })}
+              />
+            )}
+          </div>
+        </div>
+      ))}
+      {d.intents.length < 10 && (
+        <button
+          type="button"
+          className="btn btn-sm w-fit"
+          onClick={() =>
+            set({
+              intents: [
+                ...d.intents,
+                { id: newId('intent'), label: `Path ${d.intents.length + 1}`, description: '' },
+              ],
+            })
+          }
+        >
+          + Path
+        </button>
+      )}
+      <FieldKeyInput
+        label="Save the path’s name to (optional)"
+        value={d.saveTo ?? ''}
+        keys={ctx.fieldKeys}
+        onChange={(v) => set({ saveTo: v || undefined })}
+      />
     </>
   );
 }

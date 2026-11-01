@@ -9,6 +9,7 @@ import {
   type Icon as PhosphorIcon,
   Play,
   Question,
+  Signpost,
   Sparkle,
 } from '@phosphor-icons/react';
 import type { ConditionRule, FlowNode, FlowNodeType, NodeOf } from '@social-switchboard/flow';
@@ -49,12 +50,18 @@ export const STEP_META: Record<FlowNodeType, { label: string; icon: PhosphorIcon
       icon: Sparkle,
       blurb: 'Let AI talk toward a goal and collect details',
     },
+    ai_route: {
+      label: 'AI sort',
+      icon: Signpost,
+      blurb: 'Branch on what their message is asking for',
+    },
   };
 
 export const ADDABLE: FlowNodeType[] = [
   'message',
   'ask',
   'ai',
+  'ai_route',
   'condition',
   'action',
   'delay',
@@ -142,6 +149,22 @@ export function defaultStep(type: FlowNodeType, position: { x: number; y: number
           timeoutHours: 24,
         },
       };
+    case 'ai_route':
+      return {
+        id,
+        type,
+        position,
+        data: {
+          intents: [
+            { id: newId('intent'), label: 'Pricing', description: 'asks what something costs' },
+            {
+              id: newId('intent'),
+              label: 'Booking',
+              description: 'wants to book or change a time',
+            },
+          ],
+        },
+      };
   }
 }
 
@@ -219,6 +242,11 @@ export function handleLabels(node: FlowNode): { id: string; label: string }[] {
         { id: 'gave_up', label: 'Didn’t get there' },
         { id: 'timeout', label: 'No reply' },
       ];
+    case 'ai_route':
+      return [
+        ...node.data.intents.map((i) => ({ id: i.id, label: i.label })),
+        { id: 'else', label: 'None of these' },
+      ];
     case 'goto_flow':
     case 'handoff':
       return [];
@@ -258,6 +286,8 @@ export function summarize(node: FlowNode, flowName: (id: string) => string | und
       return node.data.note || 'Automation pauses until someone resumes it';
     case 'ai':
       return `${node.data.goal}${node.data.collect.length ? `\n→ collects ${node.data.collect.map((c) => `{{${c.key}}}`).join(', ')}` : ''}`;
+    case 'ai_route':
+      return `What is their message asking for?${node.data.saveTo ? `\n→ saved to {{${node.data.saveTo}}}` : ''}`;
   }
 }
 

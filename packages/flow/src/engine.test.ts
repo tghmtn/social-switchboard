@@ -533,6 +533,78 @@ describe('AI steps', () => {
   });
 });
 
+describe('AI sort steps', () => {
+  const g = graph({
+    nodes: [
+      { id: 'start', type: 'start' },
+      {
+        id: 'sort',
+        type: 'ai_route',
+        data: {
+          intents: [
+            { id: 'price', label: 'Pricing', description: 'asks what it costs' },
+            { id: 'book', label: 'Booking' },
+          ],
+          saveTo: 'topic',
+        },
+      },
+      { id: 'prices', type: 'message', data: text('Classes are $40.') },
+      { id: 'fallback', type: 'message', data: text('Tell me more?') },
+    ],
+    edges: [
+      e('start', 'next', 'sort'),
+      e('sort', 'price', 'prices'),
+      e('sort', 'else', 'fallback'),
+    ],
+  });
+  const tokenOf = (s: RunState) => (s.wait?.kind === 'route' ? s.wait.token : '');
+
+  it('asks the host to sort, then follows the picked intent and saves its label', () => {
+    const start = advance(g, null, { type: 'start' }, ctx());
+    expect(start.effects).toEqual([{ type: 'ai_route', nodeId: 'sort' }]);
+    expect(start.state.wait).toMatchObject({ kind: 'route', until: '2026-11-02T17:10:00.000Z' });
+    expect(
+      advance(g, start.state, { type: 'ai_route_result', token: 'old', intent: 'price' }, ctx())
+        .handled,
+    ).toBe(false);
+    // A message while it sorts is taken in, not treated as a fresh conversation.
+    const meanwhile = advance(g, start.state, { type: 'message', text: 'and when?' }, ctx());
+    expect(meanwhile).toMatchObject({ handled: true, effects: [], state: start.state });
+
+    const picked = advance(
+      g,
+      start.state,
+      { type: 'ai_route_result', token: tokenOf(start.state), intent: 'price' },
+      ctx(),
+    );
+    expect(sends(picked.effects)).toEqual(['Classes are $40.']);
+    expect(picked.contact.fields).toMatchObject({ topic: 'Pricing' });
+  });
+
+  it('goes through "else" for no match, an unknown intent, or no answer in time', () => {
+    const start = advance(g, null, { type: 'start' }, ctx());
+    const token = tokenOf(start.state);
+    for (const event of [
+      { type: 'ai_route_result', token } as const,
+      { type: 'ai_route_result', token, intent: 'made_up' } as const,
+      { type: 'wake', token } as const,
+    ]) {
+      const r = advance(g, start.state, event, ctx());
+      expect(sends(r.effects)).toEqual(['Tell me more?']);
+      expect(r.contact.fields).not.toHaveProperty('topic');
+    }
+    // "Booking" matched but leads nowhere: the run just ends.
+    const unconnected = advance(
+      g,
+      start.state,
+      { type: 'ai_route_result', token, intent: 'book' },
+      ctx(),
+    );
+    expect(unconnected.state.status).toBe('completed');
+    expect(unconnected.contact.fields).toMatchObject({ topic: 'Booking' });
+  });
+});
+
 describe('the lead magnet starter (WORKSHOP scenario)', () => {
   const starter = STARTERS.find((s) => s.key === 'lead_magnet');
   const g = graph(starter?.graph ?? { nodes: [], edges: [] });

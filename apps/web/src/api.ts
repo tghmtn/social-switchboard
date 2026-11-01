@@ -82,7 +82,7 @@ export type SimRun = {
   flowName: string;
   test: boolean;
   status: 'waiting' | 'completed' | 'failed' | 'expired' | 'cancelled';
-  waitKind: 'delay' | 'input' | 'choice' | null;
+  waitKind: 'delay' | 'input' | 'choice' | 'ai' | 'route' | null;
   wakeAt: string | null;
   error: string | null;
   startedAt: string;

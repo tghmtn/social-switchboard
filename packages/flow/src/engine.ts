@@ -36,7 +36,9 @@ export type RunWait =
       missed: boolean;
       until: string;
       token: string;
-    };
+    }
+  /** An AI sort step: the host is reading their message. */
+  | { kind: 'route'; nodeId: string; until: string; token: string };
 
 export type RunStatus = 'waiting' | 'completed' | 'failed' | 'expired';
 export type RunState = { status: RunStatus; wait?: RunWait; error?: string };
@@ -57,7 +59,9 @@ export type EngineEvent =
       reply?: string;
       fields?: Record<string, string>;
       outcome: 'continue' | 'done' | 'handoff';
-    };
+    }
+  /** The AI sort step's pick (an intent id; none means "else"); `token` must match. */
+  | { type: 'ai_route_result'; token: string; intent?: string };
 
 export type OutboundButton =
   | { id: string; kind: 'url'; label: string; url: string }
@@ -79,7 +83,9 @@ export type Effect =
   | { type: 'handoff'; note?: string }
   | { type: 'start_flow'; flowId: string }
   /** The host should get the AI step's next reply and come back with an ai_result. */
-  | { type: 'ai_turn'; nodeId: string };
+  | { type: 'ai_turn'; nodeId: string }
+  /** The host should sort their latest message and come back with an ai_route_result. */
+  | { type: 'ai_route'; nodeId: string };
 
 export type AdvanceContext = {
   contact: ContactSnapshot;
@@ -106,6 +112,8 @@ export const MAX_STEPS_PER_ADVANCE = 100;
 
 const HOUR = 3_600_000;
 const UNIT_MS = { minutes: 60_000, hours: HOUR, days: 24 * HOUR } as const;
+/** How long an AI sort waits for the host before carrying on through "else". */
+const ROUTE_TIMEOUT_MS = 10 * 60_000;
 const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
 export function advance(
@@ -149,6 +157,8 @@ class Runner {
       case 'wake': {
         if (event.token !== wait.token) return this.ignored(state);
         if (wait.kind === 'delay') return this.done(this.follow(wait.nodeId, 'next'));
+        // The host never answered the sort: carry on as if nothing matched.
+        if (wait.kind === 'route') return this.done(this.routeTo(wait.nodeId));
         // A reply timeout: go down the "timeout" path if one is connected, otherwise expire quietly.
         return this.g.next(wait.nodeId, 'timeout')
           ? this.done(this.follow(wait.nodeId, 'timeout'))
@@ -167,8 +177,14 @@ class Runner {
           return this.ignored(state);
         return this.done(this.aiResult(wait, event));
       }
+      case 'ai_route_result': {
+        if (wait.kind !== 'route' || event.token !== wait.token) return this.ignored(state);
+        return this.done(this.routeTo(wait.nodeId, event.intent));
+      }
       case 'message': {
         if (wait.kind === 'ai') return this.done(this.aiMessage(wait));
+        // Written while their last message is being sorted: the sort reads it too.
+        if (wait.kind === 'route') return this.done(state);
         if (wait.kind === 'input') return this.done(this.answer(wait, event.text));
         if (wait.kind !== 'choice') return this.ignored(state);
         const node = this.nodeOf(wait.nodeId, 'message');
@@ -267,6 +283,15 @@ class Runner {
     });
   }
 
+  /** Leaves an AI sort step through the picked intent, or "else". */
+  private routeTo(nodeId: string, intentId?: string): RunState {
+    const node = this.nodeOf(nodeId, 'ai_route');
+    if (!node) return { status: 'failed', error: `Step ${nodeId} is missing.` };
+    const intent = node.data.intents.find((i) => i.id === intentId);
+    if (intent && node.data.saveTo) this.setField(node.data.saveTo, intent.label);
+    return this.follow(node.id, intent ? intent.id : 'else');
+  }
+
   private follow(nodeId: string, handle: string): RunState {
     const target = this.g.next(nodeId, handle);
     return target ? this.runFrom(target) : { status: 'completed' };
@@ -348,6 +373,13 @@ class Runner {
           return { status: 'completed' };
         case 'ai':
           return this.aiTurn(node, 0);
+        case 'ai_route':
+          this.effects.push({ type: 'ai_route', nodeId: node.id });
+          return this.waitFor({
+            kind: 'route',
+            nodeId: node.id,
+            until: new Date(this.ctx.now.getTime() + ROUTE_TIMEOUT_MS).toISOString(),
+          });
       }
     }
     return { status: 'completed' };
@@ -429,7 +461,7 @@ class Runner {
     return new Date(this.ctx.now.getTime() + hours * HOUR).toISOString();
   }
 
-  private nodeOf<T extends 'message' | 'ask' | 'ai'>(id: string, type: T) {
+  private nodeOf<T extends 'message' | 'ask' | 'ai' | 'ai_route'>(id: string, type: T) {
     const node = this.g.node(id);
     return node?.type === type ? (node as NodeOf<T>) : undefined;
   }

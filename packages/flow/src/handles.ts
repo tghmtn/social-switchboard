@@ -21,6 +21,8 @@ export function outputHandles(node: FlowNode): string[] {
       return node.data.branches.map((b) => b.id);
     case 'ai':
       return ['done', 'handoff', 'gave_up', 'timeout'];
+    case 'ai_route':
+      return [...node.data.intents.map((i) => i.id), 'else'];
     case 'goto_flow':
     case 'handoff':
       return [];

@@ -279,6 +279,8 @@ export function describeGraph(graph: { nodes: unknown[]; edges: unknown[] }): st
         return `Hand off to a person${d.note ? `: ${short(d.note, 50)}` : ''}`;
       case 'ai':
         return `AI conversation: ${short(d.goal, 70)}`;
+      case 'ai_route':
+        return `AI sort: ${((d.intents as { label: string }[]) ?? []).map((i) => i.label).join(' / ')}, or none of these`;
       default:
         return String(n.type);
     }

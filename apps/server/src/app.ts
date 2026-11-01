@@ -6,7 +6,7 @@ import fastifyStatic from '@fastify/static';
 import { asc, eq } from 'drizzle-orm';
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import { ZodError } from 'zod';
-import { aiStepper } from './ai/flow-step';
+import { aiRouter, aiStepper } from './ai/flow-step';
 import { findSessionUser, SESSION_COOKIE, sessionCookieOptions } from './auth/sessions';
 import type { Config } from './config';
 import type { Db } from './db/client';
@@ -116,6 +116,11 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
         log: (msg, fields) => app.log.warn(fields ?? {}, msg),
       }),
       aiTurn: aiStepper({
+        db: deps.db,
+        appSecret: config.appSecret,
+        log: (msg, fields) => app.log.warn(fields ?? {}, msg),
+      }),
+      aiRoute: aiRouter({
         db: deps.db,
         appSecret: config.appSecret,
         log: (msg, fields) => app.log.warn(fields ?? {}, msg),
