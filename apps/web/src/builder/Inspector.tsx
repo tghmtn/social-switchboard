@@ -6,7 +6,8 @@ import type {
   MessagePart,
   NodeOf,
 } from '@social-switchboard/flow';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { api } from '../api';
 import { Field, Select, TextArea } from '../ui';
 import { newId, STEP_META } from './steps';
 
@@ -226,8 +227,16 @@ function MessageForm({ step, onChange, ctx }: Props<'message'> & { ctx: Ctx }) {
                   placeholder="https://…/guide.pdf"
                   hint={
                     d.buttons.length >= 3
-                      ? 'Instagram: a direct link to a PDF arrives as a document. The buttons are full, so any other link arrives as plain text.'
-                      : 'Instagram: a direct link to a PDF (up to 25MB) arrives as a document. Any other link, like a share page, arrives as a button named after the file. In the first reply to a comment, files are always buttons.'
+                      ? 'On Instagram a direct link to a PDF arrives as a document. The buttons are full, so any other link arrives as plain text.'
+                      : 'On Instagram a direct link to a PDF arrives as a document. In the first reply to a comment, files are always buttons.'
+                  }
+                />
+                <FileLinkCheck
+                  url={p.url}
+                  name={p.name}
+                  onName={(name) => setPart(i, { ...p, name })}
+                  sameLinkButton={
+                    d.buttons.find((b) => b.kind === 'url' && b.url.trim() === p.url.trim())?.label
                   }
                 />
                 <Field
@@ -259,7 +268,7 @@ function MessageForm({ step, onChange, ctx }: Props<'message'> & { ctx: Ctx }) {
               type="button"
               className="btn btn-sm"
               onClick={() =>
-                set({ parts: [...d.parts, { type: 'file', url: 'https://', name: 'Guide.pdf' }] })
+                set({ parts: [...d.parts, { type: 'file', url: 'https://', name: STARTER_NAME }] })
               }
             >
               + File
@@ -960,5 +969,126 @@ function SplitForm({ step, onChange }: Props<'split'>) {
         </button>
       )}
     </>
+  );
+}
+
+type FileCheck =
+  | { pdf: true; size?: number; name?: string }
+  | {
+      pdf: false;
+      reason: 'not_https' | 'unreachable' | 'not_pdf' | 'too_big';
+      type?: string;
+      size?: number;
+    };
+
+const sizeText = (n?: number) =>
+  !n
+    ? ''
+    : n < 1_048_576
+      ? `${Math.max(1, Math.round(n / 1024))} KB`
+      : `${(n / 1_048_576).toFixed(1)} MB`;
+const kindOf = (type?: string) =>
+  !type
+    ? 'not a PDF'
+    : type === 'text/html'
+      ? 'a web page'
+      : type.startsWith('image/')
+        ? 'an image'
+        : type.startsWith('video/')
+          ? 'a video'
+          : `a ${type} file`;
+
+/** The name "+ File" starts with; replaced by the real one once the link turns out to be a PDF. */
+const STARTER_NAME = 'Guide.pdf';
+
+/**
+ * How Instagram will send this file link, checked a moment after typing stops. A PDF document
+ * shows under the file's own name, so the name field follows it unless someone typed their own.
+ */
+function FileLinkCheck({
+  url,
+  name,
+  onName,
+  sameLinkButton,
+}: {
+  url: string;
+  name: string;
+  onName: (name: string) => void;
+  /** One of the message's own buttons opening this link: it stands in for the file's button. */
+  sameLinkButton?: string;
+}) {
+  const [result, setResult] = useState<FileCheck | 'checking'>();
+  // Read at answer time, so typing a name doesn't re-run the check.
+  const nameRef = useRef(name);
+  nameRef.current = name;
+  const onNameRef = useRef(onName);
+  onNameRef.current = onName;
+  useEffect(() => {
+    const link = url.trim();
+    if (!/^https?:\/\/[^/\s]+\.[^/\s]+/i.test(link)) {
+      setResult(undefined);
+      return;
+    }
+    let cancelled = false;
+    setResult('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const r = await api<FileCheck>('/instagram/check-file', { url: link });
+        if (cancelled) return;
+        setResult(r);
+        if (r.pdf && r.name && (!nameRef.current.trim() || nameRef.current === STARTER_NAME))
+          onNameRef.current(r.name);
+      } catch {
+        if (!cancelled) setResult(undefined);
+      }
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [url]);
+
+  if (!result) return null;
+  if (result === 'checking') return <p className="text-[13px] text-muted">Checking the link…</p>;
+  // Sentence case: file names keep their real capitals.
+  const chip =
+    'chip w-fit py-1 text-[13px] leading-snug tracking-normal normal-case whitespace-normal [overflow-wrap:anywhere]';
+  if (result.pdf) {
+    const real = result.name;
+    return (
+      <div className="grid gap-1.5">
+        <p className={`${chip} chip-success`}>
+          ✓ A PDF{result.size ? ` (${sizeText(result.size)})` : ''}: arrives on Instagram as a
+          document{real ? ` called “${real}”` : ''}
+        </p>
+        {real && name !== real && (
+          <p className="text-[13px] text-muted">
+            Instagram shows the PDF’s own name, not “{name}”. The name here only labels the button
+            in a reply to a comment. To change what people see, rename the file.{' '}
+            <button type="button" className="linkbtn" onClick={() => onName(real)}>
+              Use the file’s name
+            </button>
+          </p>
+        )}
+      </div>
+    );
+  }
+  const why = {
+    not_https: 'The link needs to start with https://',
+    unreachable: 'Couldn’t open this link',
+    not_pdf: `This link is ${kindOf(result.type)}, not a PDF`,
+    too_big: `This PDF is ${sizeText(result.size)}, over Instagram’s 25 MB limit`,
+  }[result.reason];
+  // Same label the server puts on the button (Instagram stops at 20 characters).
+  const label = Array.from(`📄 ${name.trim() || 'File'}`)
+    .slice(0, 20)
+    .join('');
+  return (
+    <p className={`${chip} chip-orange`}>
+      {why}
+      {sameLinkButton
+        ? `. Your “${sameLinkButton}” button already opens it, so that’s what people get`
+        : `, so it arrives as a button labeled “${label}”`}
+    </p>
   );
 }

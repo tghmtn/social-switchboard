@@ -145,18 +145,45 @@ export type AssignedAccount = {
 
 /** Largest file Instagram attaches to a message. */
 const FILE_MAX = 25 * 1024 * 1024;
-const pdfChecks = new Map<string, { pdf: boolean; at: number }>();
+
+export type FileCheck =
+  /** `name`: what Instagram labels the document with, the file's own name. */
+  | { pdf: true; size?: number; name?: string }
+  | {
+      pdf: false;
+      reason: 'not_https' | 'unreachable' | 'not_pdf' | 'too_big';
+      /** What the link serves instead, e.g. text/html. */
+      type?: string;
+      size?: number;
+    };
+const fileChecks = new Map<string, { result: FileCheck; at: number }>();
+
+/** The file's own name: from Content-Disposition, else the last part of the link. */
+function fileNameOf(res: Response, url: string) {
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const raw =
+    /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(disposition)?.[1] ??
+    /filename\s*=\s*"?([^";]+)"?/i.exec(disposition)?.[1] ??
+    new URL(res.url || url).pathname.split('/').pop();
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw.trim());
+  } catch {
+    return raw.trim();
+  }
+}
 
 /**
  * Whether Instagram can send this link as a document: an https link to a PDF (by its Content-Type)
  * of at most 25MB. A share page that shows a file isn't one. Remembered for an hour.
  */
-export async function isPdfUrl(url: string): Promise<boolean> {
-  const hit = pdfChecks.get(url);
-  if (hit && Date.now() - hit.at < 3_600_000) return hit.pdf;
-  let pdf = false;
-  try {
-    if (/^https:\/\//i.test(url)) {
+export async function checkFileUrl(url: string): Promise<FileCheck> {
+  const hit = fileChecks.get(url);
+  if (hit && Date.now() - hit.at < 3_600_000) return hit.result;
+  let result: FileCheck;
+  if (!/^https:\/\//i.test(url)) result = { pdf: false, reason: 'not_https' };
+  else {
+    try {
       const ask = (method: string) =>
         http(url, { method, redirect: 'follow', signal: AbortSignal.timeout(4000) });
       let res = await ask('HEAD');
@@ -164,17 +191,22 @@ export async function isPdfUrl(url: string): Promise<boolean> {
         res = await ask('GET'); // some servers refuse HEAD; read the headers, skip the body
         await res.body?.cancel();
       }
-      pdf =
-        res.ok &&
-        /^application\/pdf\b/i.test(res.headers.get('content-type') ?? '') &&
-        Number(res.headers.get('content-length') ?? 0) <= FILE_MAX;
+      const type = res.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+      const length = Number(res.headers.get('content-length'));
+      const size = length > 0 ? length : undefined;
+      if (!res.ok) result = { pdf: false, reason: 'unreachable' };
+      else if (type !== 'application/pdf') result = { pdf: false, reason: 'not_pdf', type, size };
+      else if (size && size > FILE_MAX) result = { pdf: false, reason: 'too_big', type, size };
+      else result = { pdf: true, size, name: fileNameOf(res, url) };
+    } catch {
+      result = { pdf: false, reason: 'unreachable' };
     }
-  } catch {
-    pdf = false; // unreachable: send it as a link instead
   }
-  pdfChecks.set(url, { pdf, at: Date.now() });
-  return pdf;
+  fileChecks.set(url, { result, at: Date.now() });
+  return result;
 }
+
+export const isPdfUrl = async (url: string) => (await checkFileUrl(url)).pdf;
 
 /** One Instagram professional account by ID; fails unless the Unified login token may use it. */
 export async function instagramAccount(token: string, igUserId: string) {

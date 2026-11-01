@@ -139,7 +139,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     const path = url.pathname.replace(/^\/v[\d.]+/, '');
     if (url.host === 'files.example.test')
       return new Response(null, {
-        headers: { 'content-type': path === '/guide.pdf' ? 'application/pdf' : 'text/html' },
+        headers: { 'content-type': path.endsWith('.pdf') ? 'application/pdf' : 'text/html' },
       });
     if (url.host === 'graph.facebook.com') {
       if (path === '/oauth/access_token') return json({ access_token: 'system-user-token' });
@@ -552,8 +552,17 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
 
   it('tells a real PDF link from a page that shows one', async () => {
     expect(await isPdfUrl('https://files.example.test/guide.pdf')).toBe(true);
-    expect(await isPdfUrl('https://files.example.test/share/abc')).toBe(false);
     expect(await isPdfUrl('http://files.example.test/guide.pdf')).toBe(false);
+    // What the builder shows under the file field.
+    const page = await call('POST', '/api/instagram/check-file', {
+      url: 'https://files.example.test/share/abc',
+    });
+    expect(page.body).toEqual({ pdf: false, reason: 'not_pdf', type: 'text/html' });
+    // A PDF's own name is what Instagram shows on the document.
+    const pdf = await call('POST', '/api/instagram/check-file', {
+      url: 'https://files.example.test/Sling%20Inspection.pdf?sig=1',
+    });
+    expect(pdf.body).toEqual({ pdf: true, name: 'Sling Inspection.pdf' });
   });
 
   it('handles a DM once, even when another delivery starts a pass mid-way', async () => {

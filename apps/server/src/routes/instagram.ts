@@ -536,6 +536,13 @@ export const instagramRoutes =
       return reply.code(204).send();
     });
 
+    /** For the builder: will Instagram send this file link as a document, or as a link button? */
+    app.post('/instagram/check-file', async (req) => {
+      who(req);
+      const { url } = z.object({ url: z.string().trim().min(1).max(2000) }).parse(req.body);
+      return graph.checkFileUrl(url);
+    });
+
     /** Recent posts, for picking which post a comment trigger watches. `after` pages back. */
     app.get('/instagram/media', async (req, reply) => {
       const { workspace } = who(req);
