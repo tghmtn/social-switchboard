@@ -31,15 +31,15 @@
     root.innerHTML = `<style>
       :host { all: initial; }
       .launcher {
-        position: fixed; right: 20px; bottom: 20px; z-index: 2147483000;
+        position: fixed; right: 20px; bottom: calc(20px + var(--lift, 0px)); z-index: 2147483000;
         width: 60px; height: 60px; border-radius: 50%; border: 0; cursor: pointer;
         display: grid; place-items: center; color: #fff; background: ${color};
         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
       }
       .launcher:focus-visible { outline: 3px solid #111; outline-offset: 3px; }
       .panel {
-        position: fixed; right: 20px; bottom: 92px; z-index: 2147483000;
-        width: 380px; height: min(640px, calc(100vh - 120px));
+        position: fixed; right: 20px; bottom: calc(92px + var(--lift, 0px)); z-index: 2147483000;
+        width: 380px; height: min(640px, calc(100vh - 120px - var(--lift, 0px)));
         border-radius: 16px; overflow: hidden; background: #fff;
         box-shadow: 0 12px 48px rgba(0, 0, 0, 0.3);
       }
@@ -87,5 +87,41 @@
         api.close();
     });
     document.body.append(host);
+
+    // Stay clear of a bar the site pins to the bottom of the screen (a phone tab bar, a cookie
+    // notice): sit just above it, and follow it when it slides away as the page scrolls.
+    const clearance = () => {
+      let lift = 0;
+      for (const y of [innerHeight - 2, innerHeight - 40]) {
+        let el = document.elementsFromPoint(innerWidth - 50, y).find((e) => e !== host);
+        while (el && el !== document.body && el !== document.documentElement) {
+          const position = getComputedStyle(el).position;
+          if (position === 'fixed' || position === 'sticky') {
+            const box = el.getBoundingClientRect();
+            if (box.bottom >= innerHeight - 30 && box.height < innerHeight * 0.4)
+              lift = Math.max(lift, innerHeight - box.top - 8);
+            break;
+          }
+          el = el.parentElement;
+        }
+      }
+      wrap.style.setProperty('--lift', `${Math.round(lift)}px`);
+    };
+    // Every frame while the page moves (and a little after, for bars that settle with a
+    // transition), and now and then otherwise, for bars that appear on their own.
+    let until = 0;
+    const follow = () => {
+      clearance();
+      if (performance.now() < until) requestAnimationFrame(follow);
+    };
+    const watch = () => {
+      const following = performance.now() < until;
+      until = performance.now() + 600;
+      if (!following) requestAnimationFrame(follow);
+    };
+    addEventListener('scroll', watch, { passive: true });
+    addEventListener('resize', watch);
+    setInterval(clearance, 1000);
+    watch();
   }
 })();
