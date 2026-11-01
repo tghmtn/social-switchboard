@@ -28,6 +28,7 @@ import {
 } from '../api';
 import { Inspector } from '../builder/Inspector';
 import { StepNode, type StepNodeType } from '../builder/StepNode';
+import { ExitsEditor, StepOutline } from '../builder/StepOutline';
 import { ADDABLE, defaultStep, newId, STEP_META } from '../builder/steps';
 import { TriggersEditor, triggerText } from '../builder/Triggers';
 import { Icon } from '../components/Icon';
@@ -97,7 +98,7 @@ function Editor({
   const flowId = detail.flow.id;
   const flows = useApi<{ flows: FlowSummary[] }>('/flows');
   const fields = useApi<{ system: { key: string }[]; fields: FieldDef[] }>('/fields');
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const canvas = useRef<HTMLDivElement>(null);
 
   const [nodes, setNodes] = useState<StepNodeType[]>(() => detail.flow.draft.nodes.map(toRfNode));
@@ -109,11 +110,24 @@ function Editor({
   const [publishing, setPublishing] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [adding, setAdding] = useState(false);
+  // Phones (below 1024px): a list of steps by default, the canvas or the test chat on request,
+  // and a step opens full screen.
+  const [mode, setMode] = useState<'steps' | 'canvas' | 'test'>('steps');
+  const [sheet, setSheet] = useState<string | null>(null);
+  const [phoneAdding, setPhoneAdding] = useState(false);
+  const isPhone = () => window.matchMedia('(max-width: 1023px)').matches;
+  // The canvas was hidden, so it had no size to fit to: fit it once it shows and has measured.
+  useEffect(() => {
+    if (mode !== 'canvas') return;
+    const fit = () => void fitView({ maxZoom: 1, padding: 0.15 });
+    const timers = [100, 300].map((ms) => setTimeout(fit, ms));
+    return () => {
+      for (const t of timers) clearTimeout(t);
+    };
+  }, [mode, fitView]);
   const published = Boolean(detail.flow.publishedVersionId);
   const latest = detail.versions[0];
-  const [unpublished, setUnpublished] = useState(
-    !latest || new Date(detail.flow.updatedAt) > new Date(latest.createdAt),
-  );
+  const [unpublished, setUnpublished] = useState(detail.hasUnpublishedChanges);
 
   const graph = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
   const graphJson = useMemo(() => JSON.stringify(graph), [graph]);
@@ -184,6 +198,20 @@ function Editor({
     [nodes],
   );
 
+  /** Points one exit at a step (or nowhere), replacing what it pointed at. */
+  function connectExit(source: string, handle: string, target: string | null) {
+    setEdges((es) => [
+      ...es.filter((e) => !(e.source === source && (e.sourceHandle ?? 'next') === handle)),
+      ...(target ? [{ id: newId('e'), source, sourceHandle: handle, target }] : []),
+    ]);
+  }
+
+  /** Phones: opens a step full screen (and selects it, so a new step chains after it). */
+  function openStep(nodeId: string) {
+    setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === nodeId })));
+    setSheet(nodeId);
+  }
+
   function updateStep(step: FlowNode) {
     setNodes((ns) => ns.map((n) => (n.id === step.id ? { ...n, data: { ...n.data, step } } : n)));
     // Drop connections from outputs that no longer exist (a removed button, case or path).
@@ -227,6 +255,10 @@ function Editor({
         ]);
     }
     setTab('step');
+    if (isPhone()) {
+      setPhoneAdding(false);
+      setSheet(step.id);
+    }
   }
 
   async function publish() {
@@ -295,44 +327,53 @@ function Editor({
   };
 
   return (
-    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col min-[900px]:h-dvh">
-      <header className="flex flex-wrap items-center gap-3 border-b-2 border-edge bg-surface px-4 py-3">
-        <Link to="/flows" className="linkbtn">
-          ← Flows
+    <div className="flex h-dvh flex-col">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b-2 border-edge bg-surface px-2 pt-[calc(0.375rem+env(safe-area-inset-top))] pb-1.5 sm:px-4 sm:py-3">
+        <Link
+          to="/flows"
+          className="grid size-11 shrink-0 place-items-center text-[22px] font-bold text-ink no-underline sm:size-auto sm:text-[14px] sm:text-link sm:underline"
+          aria-label="Back to flows"
+        >
+          <span aria-hidden className="sm:hidden">
+            ←
+          </span>
+          <span className="hidden sm:inline">← Flows</span>
         </Link>
         <label htmlFor="flow-name" className="sr-only">
           Flow name
         </label>
         <input
           id="flow-name"
-          className="input w-auto min-w-0 flex-1 border-transparent bg-transparent px-2 text-lg font-bold hover:border-line focus:border-edge sm:max-w-sm"
+          className="input w-auto min-w-0 flex-1 border-transparent bg-transparent px-1.5 text-[17px] font-bold hover:border-line focus:border-edge sm:max-w-sm sm:px-2 sm:text-lg"
           value={name}
           maxLength={100}
           onChange={(e) => setName(e.target.value)}
           onBlur={rename}
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         />
-        {published ? (
-          unpublished ? (
-            <span className="chip chip-orange">Unpublished changes</span>
+        <span className="order-last flex basis-full items-center gap-2 pl-12 sm:order-none sm:basis-auto sm:pl-0">
+          {published ? (
+            unpublished ? (
+              <span className="chip chip-orange">Unpublished changes</span>
+            ) : (
+              <span className="chip chip-success">Live · v{latest?.number}</span>
+            )
           ) : (
-            <span className="chip chip-success">Live · v{latest?.number}</span>
-          )
-        ) : (
-          <span className="chip">Draft</span>
-        )}
-        <span className="text-[13px] text-muted" aria-live="polite">
-          {save.kind === 'saved' ? 'Saved' : save.kind === 'error' ? '' : 'Saving…'}
+            <span className="chip">Draft</span>
+          )}
+          <span className="text-[13px] text-muted" aria-live="polite">
+            {save.kind === 'saved' ? 'Saved' : save.kind === 'error' ? '' : 'Saving…'}
+          </span>
         </span>
         <button
           type="button"
-          className="btn btn-primary btn-sm ml-auto"
+          className="btn btn-primary btn-sm shrink-0 sm:ml-auto"
           disabled={
             publishing || save.kind === 'error' || errors.length > 0 || (published && !unpublished)
           }
           onClick={publish}
         >
-          {publishing ? 'Publishing…' : published ? 'Publish changes' : 'Publish'}
+          {publishing ? 'Publishing…' : published && unpublished ? 'Publish changes' : 'Publish'}
         </button>
       </header>
       {(save.kind === 'error' || notice) && (
@@ -345,8 +386,60 @@ function Editor({
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-rows-[60vh_auto] lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-1">
-        <div ref={canvas} className="relative min-h-0">
+      {/* Phones: which view. */}
+      <div className="flex border-b-2 border-edge bg-surface lg:hidden" role="tablist">
+        {(
+          [
+            ['steps', 'Steps'],
+            ['canvas', 'Canvas'],
+            ['test', 'Test chat'],
+          ] as const
+        ).map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            className={`flex-1 px-3 py-2.5 text-sm font-bold ${mode === m ? 'bg-surface-2 shadow-[inset_0_-3px_0_var(--sb-primary)]' : 'text-muted'}`}
+            onClick={() => setMode(m)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="relative flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_380px]">
+        {mode === 'steps' && (
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:hidden">
+            <StepOutline
+              nodes={nodes}
+              edges={edges}
+              issues={issueCount}
+              flowName={(fid) => flowNames.get(fid)}
+              triggers={triggerChips}
+              onOpen={openStep}
+            />
+            {errors.length + warnings.length > 0 && (
+              <p className="mt-3 text-[13px] text-muted">
+                {errors.length ? `${errors.length} to fix before publishing. ` : ''}
+                {warnings.length ? `${warnings.length} to check.` : ''} Steps marked Fix say why.
+              </p>
+            )}
+          </div>
+        )}
+        {mode === 'test' && (
+          <div className="min-h-0 flex-1 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:hidden">
+            <div className="h-full">
+              <Simulator flowId={flowId} showState={false} />
+            </div>
+          </div>
+        )}
+        <div
+          ref={canvas}
+          // Phones: kept laid out (but transparent) behind the other views, so its steps are
+          // measured and it can fit them the moment it shows.
+          className={`relative min-h-0 flex-1 ${mode === 'canvas' ? '' : 'max-lg:pointer-events-none max-lg:absolute max-lg:inset-0 max-lg:opacity-0'}`}
+        >
           <ReactFlow
             nodes={viewNodes}
             edges={edges}
@@ -359,6 +452,9 @@ function Editor({
             fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
             minZoom={0.2}
             deleteKeyCode={['Backspace', 'Delete']}
+            onNodeClick={(_, node) => {
+              if (isPhone()) setSheet(node.id);
+            }}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={24} size={1.5} color="var(--sb-line)" />
@@ -404,7 +500,7 @@ function Editor({
         </div>
 
         <aside
-          className="min-h-0 overflow-y-auto border-t-2 border-edge bg-surface lg:border-t-0 lg:border-l-2"
+          className="hidden min-h-0 overflow-y-auto border-edge bg-surface lg:block lg:border-l-2"
           aria-label="Step details"
         >
           <div className="sticky top-0 z-10 flex border-b-2 border-edge bg-surface" role="tablist">
@@ -434,13 +530,21 @@ function Editor({
                 onChange={() => void reloadDetail()}
               />
             ) : selected ? (
-              <Inspector
-                key={selected.id}
-                step={selected.data.step}
-                onChange={updateStep}
-                onDelete={() => removeStep(selected.id)}
-                ctx={{ fieldKeys, flows: flows.data?.flows ?? [], currentFlowId: flowId }}
-              />
+              <div className="grid gap-4">
+                <Inspector
+                  key={selected.id}
+                  step={selected.data.step}
+                  onChange={updateStep}
+                  onDelete={() => removeStep(selected.id)}
+                  ctx={{ fieldKeys, flows: flows.data?.flows ?? [], currentFlowId: flowId }}
+                />
+                <ExitsEditor
+                  step={selected.data.step}
+                  nodes={nodes}
+                  edges={edges}
+                  onConnect={(h, t) => connectExit(selected.id, h, t)}
+                />
+              </div>
             ) : (
               <div className="grid gap-4">
                 <p className="text-[15px] text-muted">
@@ -474,6 +578,121 @@ function Editor({
           </div>
         </aside>
       </div>
+
+      {/* Phones: add a step (after the one last opened). */}
+      {mode === 'steps' && (
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t-2 border-edge bg-surface px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] lg:hidden">
+          {phoneAdding && (
+            <div className="mb-2 grid max-h-[55dvh] gap-1 overflow-y-auto" role="menu">
+              {selected && (
+                <p className="px-1 text-[13px] text-muted">
+                  Connects after “{STEP_META[selected.data.step.type].label}”.
+                </p>
+              )}
+              {ADDABLE.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="menuitem"
+                  className="sheet-row"
+                  onClick={() => addStep(t)}
+                >
+                  <Icon icon={STEP_META[t].icon} size={24} />
+                  <span className="grid text-left leading-tight">
+                    <span className="font-bold">{STEP_META[t].label}</span>
+                    <span className="text-[13px] text-muted">{STEP_META[t].blurb}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            className={`btn w-full ${phoneAdding ? '' : 'btn-primary'}`}
+            aria-expanded={phoneAdding}
+            onClick={() => setPhoneAdding((a) => !a)}
+          >
+            {phoneAdding ? 'Cancel' : '+ Add step'}
+          </button>
+        </div>
+      )}
+
+      {sheet &&
+        (() => {
+          const node = nodes.find((n) => n.id === sheet);
+          if (!node) return null;
+          const meta = STEP_META[node.data.step.type];
+          return (
+            <div
+              className="sheet fixed inset-0 z-40 flex flex-col bg-bg lg:hidden"
+              role="dialog"
+              aria-modal="true"
+              aria-label={meta.label}
+            >
+              <div className="flex items-center gap-2 border-b-2 border-edge bg-surface px-2 pt-[calc(0.375rem+env(safe-area-inset-top))] pb-1.5">
+                <button
+                  type="button"
+                  className="grid size-11 place-items-center text-[22px] font-bold"
+                  aria-label="Back to the steps"
+                  onClick={() => setSheet(null)}
+                >
+                  ←
+                </button>
+                <Icon icon={meta.icon} size={22} />
+                <span className="flex-1 truncate font-bold">{meta.label}</span>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setSheet(null)}
+                >
+                  Done
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto bg-surface px-4 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+                {node.data.step.type === 'start' ? (
+                  <TriggersEditor
+                    flowId={flowId}
+                    triggers={detail.triggers}
+                    published={published}
+                    onChange={() => void reloadDetail()}
+                  />
+                ) : (
+                  <div className="grid gap-4">
+                    <Inspector
+                      key={node.id}
+                      step={node.data.step}
+                      onChange={updateStep}
+                      onDelete={() => {
+                        removeStep(node.id);
+                        setSheet(null);
+                      }}
+                      ctx={{ fieldKeys, flows: flows.data?.flows ?? [], currentFlowId: flowId }}
+                    />
+                  </div>
+                )}
+                <div className="mt-4">
+                  <ExitsEditor
+                    step={node.data.step}
+                    nodes={nodes}
+                    edges={edges}
+                    onConnect={(h, t) => connectExit(node.id, h, t)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn mt-5 w-full"
+                  onClick={() => {
+                    setSheet(null);
+                    setMode('steps');
+                    setPhoneAdding(true);
+                  }}
+                >
+                  + Add a step after this one
+                </button>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }

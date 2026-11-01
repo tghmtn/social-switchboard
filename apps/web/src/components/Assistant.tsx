@@ -168,7 +168,7 @@ export function AssistantPanel({ me, onClose }: { me: Me; onClose: () => void })
       aria-label="Assistant"
       className="fixed inset-0 z-50 flex flex-col bg-surface shadow-hard-xl sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[460px] sm:border-l-2 sm:border-edge"
     >
-      <header className="flex items-center gap-1 border-b-2 border-edge py-2 pr-2 pl-4">
+      <header className="flex items-center gap-1 border-b-2 border-edge pt-[calc(0.5rem+env(safe-area-inset-top))] pr-2 pb-2 pl-4 sm:pt-2">
         <Sparkle size={20} weight="fill" className="shrink-0 text-primary" aria-hidden />
         <div className="ml-1 min-w-0 flex-1">
           <h2 className="text-[16px] leading-tight font-bold">Assistant</h2>
@@ -289,7 +289,7 @@ export function AssistantPanel({ me, onClose }: { me: Me; onClose: () => void })
           </div>
 
           {thread?.status === 'waiting' && waitingCount > 0 ? (
-            <div className="grid gap-2 border-t-2 border-edge bg-surface-2 px-4 py-3">
+            <div className="grid gap-2 border-t-2 border-edge bg-surface-2 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
               <p className="text-[14px] font-bold">
                 {waitingCount > 1 ? 'Apply the checked changes?' : 'Apply this change?'}
               </p>
@@ -321,7 +321,7 @@ export function AssistantPanel({ me, onClose }: { me: Me; onClose: () => void })
             </div>
           ) : (
             <form
-              className="grid gap-2 border-t-2 border-edge px-3 py-3"
+              className="grid gap-2 border-t-2 border-edge px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
               onSubmit={(e) => {
                 e.preventDefault();
                 void send(text);

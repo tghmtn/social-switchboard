@@ -70,23 +70,25 @@ export function FacebookChannel() {
           ) : (
             <ul className="grid divide-y-2 divide-line border-2 border-edge">
               {s.pages.map((p) => (
-                <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
                   <Avatar name={p.name ?? 'Page'} src={p.pictureUrl ?? undefined} />
-                  <span className="grid flex-1">
-                    <span className="font-bold">{p.name ?? p.pageId}</span>
+                  <span className="grid min-w-0 flex-1 gap-0.5">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-bold">{p.name ?? p.pageId}</span>
+                      <span
+                        className={`chip ${p.status === 'connected' ? 'chip-success' : 'chip-danger'}`}
+                      >
+                        {p.status === 'connected' ? 'Connected' : 'Needs reconnecting'}
+                      </span>
+                    </span>
                     <span className="text-[13px] text-muted">
                       Connected {timeAgo(p.connectedAt)}
                       {p.statusDetail ? ` · ${p.statusDetail}` : ''}
                     </span>
                   </span>
-                  <span
-                    className={`chip ${p.status === 'connected' ? 'chip-success' : 'chip-danger'}`}
-                  >
-                    {p.status === 'connected' ? 'Connected' : 'Needs reconnecting'}
-                  </span>
                   <button
                     type="button"
-                    className="linkbtn text-danger"
+                    className="btn btn-sm w-full text-danger sm:w-auto"
                     onClick={async () => {
                       if (
                         !confirm(

@@ -51,6 +51,8 @@ export type FlowDetail = {
   issues: FlowIssue[];
   triggers: Trigger[];
   versions: { id: string; number: number; createdAt: string }[];
+  /** The draft differs from the live version (or nothing is live). */
+  hasUnpublishedChanges: boolean;
 };
 export type Starter = { key: string; name: string; description: string; trigger?: TriggerConfig };
 

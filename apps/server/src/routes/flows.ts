@@ -155,7 +155,16 @@ export const flowRoutes =
           .orderBy(desc(flowVersions.number))
           .limit(20),
       ]);
-      return { flow, issues, triggers: flowTriggers, versions };
+      // Whether the draft differs from what's live (the same test as the flows list).
+      const [live] = flow.publishedVersionId
+        ? await db
+            .select({ graph: flowVersions.graph })
+            .from(flowVersions)
+            .where(eq(flowVersions.id, flow.publishedVersionId))
+        : [];
+      const hasUnpublishedChanges =
+        !live || JSON.stringify(flow.draft) !== JSON.stringify(live.graph);
+      return { flow, issues, triggers: flowTriggers, versions, hasUnpublishedChanges };
     });
 
     /** Saves the builder's working copy. Wiring problems are returned, not rejected. */

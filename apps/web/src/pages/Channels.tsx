@@ -451,14 +451,19 @@ function Overview({
   return (
     <section aria-label="Instagram setup" className="grid gap-4">
       {s.accounts.map((a) => (
-        <div key={a.id} className="card flex flex-wrap items-center gap-4">
+        <div key={a.id} className="card flex flex-wrap items-center gap-x-4 gap-y-3 p-4 sm:p-6">
           <Avatar
             name={a.username ?? a.igUserId}
             size={48}
             src={a.profilePictureUrl ?? undefined}
           />
           <div className="min-w-0 flex-1">
-            <p className="text-lg font-bold">@{a.username ?? a.igUserId}</p>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="truncate text-lg font-bold">@{a.username ?? a.igUserId}</span>
+              <span className={`chip ${a.status === 'connected' ? 'chip-success' : 'chip-danger'}`}>
+                {a.status === 'connected' ? 'Connected' : 'Needs attention'}
+              </span>
+            </p>
             <p className="text-[13px] text-muted">
               {a.accountType === 'MEDIA_CREATOR'
                 ? 'Creator'
@@ -471,30 +476,29 @@ function Overview({
               <p className="mt-1 text-[13px] font-bold text-danger">{a.statusDetail}</p>
             )}
           </div>
-          <span className={`chip ${a.status === 'connected' ? 'chip-success' : 'chip-danger'}`}>
-            {a.status === 'connected' ? 'Connected' : 'Needs attention'}
-          </span>
-          {a.status !== 'connected' && (
-            <a className="btn btn-sm" href="/api/instagram/connect">
-              Reconnect
-            </a>
-          )}
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={async () => {
-              if (
-                !confirm(
-                  `Disconnect @${a.username}? Flows stop answering on this account until you connect it again. Contacts and history stay.`,
+          <span className="flex w-full gap-2 sm:w-auto">
+            {a.status !== 'connected' && (
+              <a className="btn btn-sm flex-1 sm:flex-none" href="/api/instagram/connect">
+                Reconnect
+              </a>
+            )}
+            <button
+              type="button"
+              className="btn btn-sm flex-1 sm:flex-none"
+              onClick={async () => {
+                if (
+                  !confirm(
+                    `Disconnect @${a.username}? Flows stop answering on this account until you connect it again. Contacts and history stay.`,
+                  )
                 )
-              )
-                return;
-              await api(`/instagram/accounts/${a.id}`, undefined, 'DELETE');
-              onChange();
-            }}
-          >
-            Disconnect
-          </button>
+                  return;
+                await api(`/instagram/accounts/${a.id}`, undefined, 'DELETE');
+                onChange();
+              }}
+            >
+              Disconnect
+            </button>
+          </span>
         </div>
       ))}
 
