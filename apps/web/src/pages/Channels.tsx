@@ -133,6 +133,7 @@ export function Channels() {
     portfolio: connected.length > 0,
     webhooks: Boolean(s?.webhookVerifiedAt),
     connect: connected.length > 0,
+    messages: Boolean(s?.lastSentAt),
     publish: Boolean(s?.lastWebhookAt && firstConnectedAt && s.lastWebhookAt > firstConnectedAt),
   };
   const isDone = (id: string) => proven[id] === true || done.includes(id);
@@ -364,6 +365,22 @@ function StepExtras({
             waitText="Not connected yet"
           />
         </div>
+      );
+    }
+    case 'messages': {
+      const blocked = connected.filter((a) => a.statusDetail?.includes('Allow access to messages'));
+      return blocked.length > 0 ? (
+        <p className="border-2 border-danger px-3 py-2 text-[14px] font-bold text-danger">
+          Instagram is still blocking DMs from apps on{' '}
+          {blocked.map((a) => `@${a.username ?? a.igUserId}`).join(', ')}. Turn the switch on, then
+          try again (a new comment, or a new message to you).
+        </p>
+      ) : (
+        <Check
+          ok={Boolean(s.lastSentAt)}
+          okText={`Instagram accepted a DM from Social Switchboard ${timeAgo(s.lastSentAt)}`}
+          waitText="Checked when the first DM goes out (the “Try it” step sends one)"
+        />
       );
     }
     case 'publish':

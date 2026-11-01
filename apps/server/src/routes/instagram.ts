@@ -1,13 +1,13 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, max } from 'drizzle-orm';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
 import { encryptSecret, signToken, verifyToken } from '../crypto';
 import type { Db } from '../db/client';
-import { instagramAccounts, metaApps, webhookEvents } from '../db/schema';
+import { instagramAccounts, messages, metaApps, webhookEvents } from '../db/schema';
 import { processWebhookEvents } from '../instagram/events';
 import * as graph from '../instagram/graph';
 import { accountFor, decryptOptional, metaAppFor, metaSecrets } from '../instagram/settings';
@@ -365,6 +365,17 @@ export const instagramRoutes =
         })
         .from(instagramAccounts)
         .where(eq(instagramAccounts.workspaceId, workspaceId));
+      const [sent] = await db
+        .select({ at: max(messages.sentAt) })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.workspaceId, workspaceId),
+            eq(messages.channel, 'instagram'),
+            eq(messages.direction, 'out'),
+            eq(messages.status, 'sent'),
+          ),
+        );
       const login = s.loginUrl ? new URL(s.loginUrl) : undefined;
       return {
         publicUrl: config.publicUrl,
@@ -390,6 +401,8 @@ export const instagramRoutes =
         webhookVerifyToken: s.webhookVerifyToken,
         webhookVerifiedAt: s.webhookVerifiedAt,
         lastWebhookAt: s.lastWebhookAt,
+        /** Last DM Instagram accepted from us: proves the account allows messages from apps. */
+        lastSentAt: sent?.at ?? null,
         accounts,
       };
     };

@@ -101,7 +101,19 @@ Meta's login often doesn't tell Social Switchboard which Instagram account you p
 
 If the Instagram Account list on Meta's screen is empty or says "Instagram Pro account required", do the portfolio step above first.
 
-**Then turn on message access in Instagram.** On your phone, in the Instagram app signed in as the connected account, go to **Settings → Messages and story replies → Message controls → Connected tools** and turn on **Allow access to messages**. Without it, Instagram refuses every DM Social Switchboard sends, and the Channels page will say so. The switch only appears once an app is connected, so do this after connecting.
+## step: messages | Let Social Switchboard send your DMs
+
+**Where:** the **Instagram app on your phone**, signed in as the account you just connected. This is a setting on the Instagram account itself, not on Meta's developer site.
+
+Instagram blocks connected apps from sending DMs until you allow it. Until then, every reply fails with "The account owner has disabled access to Instagram Direct Messaging".
+
+1. Open Instagram and go to your **profile**.
+2. Tap the **☰ menu** (top right), then **Settings and activity**.
+3. Tap **Messages and story replies**.
+4. Tap **Message controls**. On some versions it's under **Message requests**.
+5. Under **Connected tools**, turn on **Allow access to messages**.
+
+The switch only shows up once an app is connected, so if it isn't there, do the step above first. The check below turns green when Instagram accepts the first DM.
 
 ## step: webhooks | Turn on webhooks
 

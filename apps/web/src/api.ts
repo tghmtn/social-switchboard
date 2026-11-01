@@ -182,6 +182,8 @@ export type InstagramSettings = {
   webhookVerifyToken: string;
   webhookVerifiedAt: string | null;
   lastWebhookAt: string | null;
+  /** Last DM Instagram accepted from us: proves the account allows messages from apps. */
+  lastSentAt: string | null;
   accounts: InstagramAccount[];
 };
 export type Guide = { markdown: string; source: 'latest' | 'bundled' };
