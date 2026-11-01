@@ -244,7 +244,8 @@ export function TriggersEditor({
             <legend className="mb-1 text-sm font-bold">On which posts</legend>
             {posts.state === 'not_connected' ? (
               <p className="text-[13px] text-muted">
-                Every post. <Link to="/channels">Connect Instagram</Link> to pick specific ones.
+                Every post. <Link to="/channels/instagram">Connect Instagram</Link> to pick specific
+                ones.
               </p>
             ) : (
               <div className="flex flex-wrap items-center gap-2">

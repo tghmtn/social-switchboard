@@ -38,7 +38,7 @@ export function Home({ me }: { me: Me }) {
       done: (o?.instagram ?? 0) > 0,
       title: 'Connect Instagram',
       detail: 'A step-by-step guide walks you through Meta’s setup, checking each step as you go.',
-      to: '/channels',
+      to: '/channels/instagram',
     },
   ];
 

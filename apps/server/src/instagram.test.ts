@@ -335,7 +335,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(start.searchParams.get('redirect_uri')).toBe(
       'https://switchboard.example.test/api/instagram/callback',
     );
-    expect(back).toBe('/channels?connected=tgtest');
+    expect(back).toBe('/channels/instagram?connected=tgtest');
     const [account] = await db.select().from(instagramAccounts);
     expect(account).toMatchObject({
       igUserId: IG_ID,
@@ -377,7 +377,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       'GET',
       `/api/instagram/callback?code=abc&state=${encodeURIComponent(start.searchParams.get('state') ?? '')}`,
     );
-    expect(String(back.headers.location)).toBe('/channels?connected=tgunified');
+    expect(String(back.headers.location)).toBe('/channels/instagram?connected=tgunified');
 
     const exchange = calls.find((c) => c.url.pathname.endsWith('/oauth/access_token'));
     expect(exchange?.url.searchParams.get('client_id')).toBe('1076000000000001');
@@ -470,7 +470,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       'GET',
       `/api/instagram/callback?code=abc&state=${encodeURIComponent(start.searchParams.get('state') ?? '')}`,
     );
-    expect(String(back.headers.location)).toBe('/channels?connected=tgfromdebug');
+    expect(String(back.headers.location)).toBe('/channels/instagram?connected=tgfromdebug');
     const debug = calls.find((c) => c.url.pathname.endsWith('/debug_token'));
     expect(debug?.url.searchParams.get('access_token')).toBe(`1076000000000001|${FB_SECRET}`);
   });
@@ -488,7 +488,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       'GET',
       `/api/instagram/callback?code=abc&state=${encodeURIComponent(start.searchParams.get('state') ?? '')}`,
     );
-    expect(String(back.headers.location)).toBe('/channels?account=needed');
+    expect(String(back.headers.location)).toBe('/channels/instagram?account=needed');
     const settings = await call<{ accountIdNeeded: boolean }>('GET', '/api/instagram/settings');
     expect(settings.body.accountIdNeeded).toBe(true);
 

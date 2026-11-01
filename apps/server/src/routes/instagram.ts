@@ -219,7 +219,7 @@ export const instagramPublicRoutes =
     /** Instagram sends the person back here after they approve the connection. */
     app.get('/instagram/callback', async (req, reply) => {
       const back = (params: Record<string, string>) =>
-        reply.redirect(`/channels?${new URLSearchParams(params)}`);
+        reply.redirect(`/channels/instagram?${new URLSearchParams(params)}`);
       const q = z
         .object({
           code: z.string().optional(),
@@ -483,7 +483,7 @@ export const instagramRoutes =
         return reply.redirect(graph.authorizeUrl(s.instagramAppId, redirect, state));
       }
       return reply.redirect(
-        `/channels?${new URLSearchParams({ error: 'Paste your Login URL and Meta app secret first.' })}`,
+        `/channels/instagram?${new URLSearchParams({ error: 'Paste your Login URL and Meta app secret first.' })}`,
       );
     });
 

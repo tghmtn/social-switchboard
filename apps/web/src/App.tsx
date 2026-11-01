@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { ApiError, api, type Me } from './api';
-import { Channels } from './pages/Channels';
+import { Channels, InstagramChannel } from './pages/Channels';
 import { ContactDetail } from './pages/ContactDetail';
 import { Contacts } from './pages/Contacts';
 import { FlowEditor } from './pages/FlowEditor';
@@ -73,6 +73,7 @@ export function App() {
               <Route path="/contacts/:id" element={<ContactDetail />} />
               <Route path="/simulator" element={<SimulatorPage />} />
               <Route path="/channels" element={<Channels />} />
+              <Route path="/channels/instagram" element={<InstagramChannel />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/settings" element={<Settings me={state.me} />} />
               <Route path="*" element={<Navigate to="/" replace />} />

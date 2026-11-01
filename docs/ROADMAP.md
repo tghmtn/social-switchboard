@@ -230,6 +230,9 @@ Each phase ends with something you can actually use.
 
 ### Phase 4: AI conversations
 
+- **AI keys in Settings** (Claude, OpenAI, or a local model), stored encrypted like the Meta secrets. Everything below uses them; nothing needs them.
+- **An in-app assistant that can act, not just chat (requested 2026-10-31).** It works through the app's own API as tools, the way an MCP server would, but inside the interface: "build a flow that sends my sling inspection PDF to anyone who comments SLING", "why didn't @ogharring get a reply?", "walk me through the webhooks step". It drafts flows and triggers on the canvas, reads contacts and logs to answer questions, and helps with channel setup. Every change it proposes is shown and confirmed before it's saved.
+
 - **AI step:**
   - goal
   - business context
@@ -269,13 +272,14 @@ Each phase ends with something you can actually use.
 
 ### Phase 7: More channels, in this order
 
-Each channel is a self-contained adapter.
+Each channel is a self-contained adapter. The Channels page already lists Facebook, TikTok, YouTube and LinkedIn as "Coming later" (2026-10-31).
 
 1. **Web chat widget.** Embeds on a Ghost or any other website. No Meta dependency.
 2. **TikTok.** Business messaging; eligibility and region limits apply, and it's unavailable in the EU and UK.
 3. **SMS** via Twilio or similar. US A2P 10DLC registration is required.
 4. **WhatsApp** via the Cloud API. Needs approved templates and has per-message charges; marketing templates to US numbers are paused.
 5. **Telegram.** The easiest technically (no review) but the lowest business priority.
+6. **YouTube** (replies to video comments) and **LinkedIn** (Page comments and messages): requested 2026-10-31; their APIs and review rules still to be checked.
 
 ### Phase 8: Ship it (v1.0)
 

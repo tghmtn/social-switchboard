@@ -1,13 +1,77 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import {
+  FacebookLogo,
+  InstagramLogo,
+  LinkedinLogo,
+  type Icon as PhosphorIcon,
+  TiktokLogo,
+  YoutubeLogo,
+} from '@phosphor-icons/react';
+import { type FormEvent, Fragment, type ReactNode, useEffect, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { ApiError, api, type Guide, type InstagramSettings, useApi } from '../api';
+import { Icon } from '../components/Icon';
 import { SquareIcon } from '../components/SquareIcons';
-import { Field, FormError, PageHeader, timeAgo } from '../ui';
+import { Avatar, Field, FormError, PageHeader, timeAgo } from '../ui';
 import { Page } from './Shell';
 
-// The Connect Instagram wizard. The words come from docs/guides/connect-instagram.md (fetched
-// fresh from the project's repo when possible); the checks, forms and buttons are built in.
+// Channels: the list, and the Instagram page (its setup at a glance, plus the Connect Instagram
+// guide). The guide's words come from docs/guides/connect-instagram.md (fetched fresh from the
+// project's repo when possible); the checks, forms and buttons are built in.
+
+const LATER: { name: string; icon: PhosphorIcon; detail: string }[] = [
+  {
+    name: 'Facebook',
+    icon: FacebookLogo,
+    detail: 'Messenger and Page comments, on the same Meta app.',
+  },
+  { name: 'TikTok', icon: TiktokLogo, detail: 'Comment and DM automation for business accounts.' },
+  { name: 'YouTube', icon: YoutubeLogo, detail: 'Replies to comments on your videos.' },
+  { name: 'LinkedIn', icon: LinkedinLogo, detail: 'Page comments and messages.' },
+];
+
+export function Channels() {
+  const { data: s } = useApi<InstagramSettings>('/instagram/settings');
+  const connected = s?.accounts.filter((a) => a.status === 'connected') ?? [];
+  const attention = s?.accounts.some((a) => a.status !== 'connected' || a.statusDetail);
+  return (
+    <Page>
+      <PageHeader title="Channels" />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Link
+          to="/channels/instagram"
+          className="card press grid content-start gap-3 text-ink no-underline"
+        >
+          <span className="flex items-center gap-3">
+            <Icon icon={InstagramLogo} size={40} />
+            <span className="text-lg font-bold">Instagram</span>
+          </span>
+          <span className="text-[14px] text-muted">Comment-to-DM and DM keyword automation.</span>
+          <span className="flex flex-wrap gap-2">
+            <span className={`chip ${connected.length ? 'chip-success' : 'chip-orange'}`}>
+              {connected.length
+                ? `Connected: ${connected.map((a) => `@${a.username ?? a.igUserId}`).join(', ')}`
+                : s?.loginMode
+                  ? 'Setup in progress'
+                  : 'Not set up'}
+            </span>
+            {attention && <span className="chip chip-danger">Needs attention</span>}
+          </span>
+        </Link>
+        {LATER.map((c) => (
+          <div key={c.name} className="card grid content-start gap-3 opacity-75">
+            <span className="flex items-center gap-3">
+              <Icon icon={c.icon} size={40} />
+              <span className="text-lg font-bold">{c.name}</span>
+            </span>
+            <span className="text-[14px] text-muted">{c.detail}</span>
+            <span className="chip w-fit">Coming later</span>
+          </div>
+        ))}
+      </div>
+    </Page>
+  );
+}
 
 type Step = { id: string; title: string; body: string };
 
@@ -94,12 +158,14 @@ function Check({ ok, okText, waitText }: { ok: boolean; okText: string; waitText
   );
 }
 
-export function Channels() {
+export function InstagramChannel() {
   const settings = useApi<InstagramSettings>('/instagram/settings');
   const guide = useApi<Guide>('/guides/connect-instagram');
   const [params, setParams] = useSearchParams();
   const [done, setDone] = useState<string[]>(loadDone);
   const [open, setOpen] = useState<string>();
+  // The guide is open until Instagram is set up; after that, on request.
+  const [guideWanted, setGuideWanted] = useState<boolean>();
   const s = settings.data;
 
   const steps = useMemo(() => {
@@ -137,11 +203,13 @@ export function Channels() {
     publish: Boolean(s?.lastWebhookAt && firstConnectedAt && s.lastWebhookAt > firstConnectedAt),
   };
   const isDone = (id: string) => proven[id] === true || done.includes(id);
+  const setUp = connected.length > 0 && Boolean(s?.webhookVerifiedAt);
+  const showGuide = guideWanted ?? !setUp;
   const nextStep = steps.find((st) => !isDone(st.id) && st.id !== 'manychat')?.id;
   const current = open ?? nextStep;
 
   // While waiting on Meta (webhook verification, the first real event), check back on our own.
-  const waiting = current === 'webhooks' || current === 'publish';
+  const waiting = showGuide && (current === 'webhooks' || current === 'publish');
   useEffect(() => {
     if (!waiting) return;
     const t = setInterval(() => void settings.reload(), 5000);
@@ -167,9 +235,21 @@ export function Channels() {
 
   return (
     <Page>
-      <PageHeader title="Channels" />
+      <Link to="/channels" className="linkbtn w-fit">
+        ← Channels
+      </Link>
+      <div className="-mt-4">
+        <PageHeader
+          title={
+            <span className="flex items-center gap-3">
+              <Icon icon={InstagramLogo} size={44} />
+              Instagram
+            </span>
+          }
+        />
+      </div>
       {banner && (
-        <div className="-mt-4 grid gap-2">
+        <div className="grid gap-2">
           {banner}
           <button
             type="button"
@@ -183,143 +263,244 @@ export function Channels() {
 
       {s?.accountIdNeeded && <AccountIdForm onSaved={() => void settings.reload()} />}
 
-      {s && s.accounts.length > 0 && (
-        <section aria-labelledby="accounts-h" className="grid gap-3">
-          <h2 id="accounts-h" className="font-display text-display-sm font-bold">
-            Instagram
-          </h2>
-          {s.accounts.map((a) => (
-            <div key={a.id} className="card flex flex-wrap items-center gap-4">
-              {a.profilePictureUrl ? (
-                <img
-                  src={a.profilePictureUrl}
-                  alt=""
-                  className="size-12 rounded-full border-2 border-edge object-cover"
-                />
-              ) : (
-                <SquareIcon name="chat" size={40} />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-lg font-bold">@{a.username ?? a.igUserId}</p>
-                <p className="text-[13px] text-muted">
-                  {a.accountType === 'MEDIA_CREATOR'
-                    ? 'Creator'
-                    : a.accountType === 'BUSINESS'
-                      ? 'Business'
-                      : 'Professional'}{' '}
-                  account · connected {timeAgo(a.connectedAt)}
-                </p>
-                {a.statusDetail && (
-                  <p className="mt-1 text-[13px] font-bold text-danger">{a.statusDetail}</p>
-                )}
-              </div>
-              <span className={`chip ${a.status === 'connected' ? 'chip-success' : 'chip-danger'}`}>
-                {a.status === 'connected' ? 'Connected' : 'Needs attention'}
-              </span>
-              {a.status !== 'connected' && (
-                <a className="btn btn-sm" href="/api/instagram/connect">
-                  Reconnect
-                </a>
-              )}
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={async () => {
-                  if (
-                    !confirm(
-                      `Disconnect @${a.username}? Flows stop answering on this account until you connect it again. Contacts and history stay.`,
-                    )
-                  )
-                    return;
-                  await api(`/instagram/accounts/${a.id}`, undefined, 'DELETE');
-                  void settings.reload();
-                }}
-              >
-                Disconnect
-              </button>
-            </div>
-          ))}
-        </section>
+      {s && (
+        <Overview
+          settings={s}
+          onChange={() => void settings.reload()}
+          guideShown={showGuide}
+          onToggleGuide={() => setGuideWanted(!showGuide)}
+        />
       )}
 
-      <section aria-labelledby="wizard-h" className="grid gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h2 id="wizard-h" className="font-display text-display-md font-bold">
-              {connected.length ? 'Instagram setup' : 'Connect Instagram'}
-            </h2>
-            <p className="mt-1 text-[15px] text-muted">
-              About 20 minutes the first time. Each step checks itself where it can.
-            </p>
+      {showGuide && (
+        <section aria-labelledby="wizard-h" className="grid gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 id="wizard-h" className="font-display text-display-md font-bold">
+                {connected.length ? 'Instagram setup' : 'Connect Instagram'}
+              </h2>
+              <p className="mt-1 text-[15px] text-muted">
+                About 20 minutes the first time. Each step checks itself where it can.
+              </p>
+            </div>
+            {guide.data && (
+              <span className="text-[12px] text-muted">
+                {guide.data.source === 'latest'
+                  ? 'Guide: latest version'
+                  : 'Guide: copy bundled with this version'}
+              </span>
+            )}
           </div>
-          {guide.data && (
-            <span className="text-[12px] text-muted">
-              {guide.data.source === 'latest'
-                ? 'Guide: latest version'
-                : 'Guide: copy bundled with this version'}
-            </span>
+
+          {s && !s.isPublic && (
+            <p className="border-2 border-accent bg-surface px-4 py-3 text-[15px]">
+              <b>This install isn’t on a public https address yet</b> (it’s set to {s.publicUrl}).
+              Meta needs one to reach your webhooks. See “Serving it on a real domain” in the
+              README, then set <code>PUBLIC_URL</code>.
+            </p>
           )}
-        </div>
 
-        {s && !s.isPublic && (
-          <p className="border-2 border-accent bg-surface px-4 py-3 text-[15px]">
-            <b>This install isn’t on a public https address yet</b> (it’s set to {s.publicUrl}).
-            Meta needs one to reach your webhooks. See “Serving it on a real domain” in the README,
-            then set <code>PUBLIC_URL</code>.
-          </p>
-        )}
-
-        <ol className="grid gap-3">
-          {steps.map((st, i) => {
-            const isOpen = current === st.id;
-            const complete = isDone(st.id);
-            const optional = st.id === 'manychat';
-            return (
-              <li
-                key={st.id}
-                className={`border-2 bg-surface ${isOpen ? 'border-edge shadow-hard' : 'border-line'}`}
-              >
-                <button
-                  type="button"
-                  aria-expanded={isOpen}
-                  onClick={() => setOpen(isOpen ? '' : st.id)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2"
+          <ol className="grid gap-3">
+            {steps.map((st, i) => {
+              const isOpen = current === st.id;
+              const complete = isDone(st.id);
+              const optional = st.id === 'manychat';
+              return (
+                <li
+                  key={st.id}
+                  className={`border-2 bg-surface ${isOpen ? 'border-edge shadow-hard' : 'border-line'}`}
                 >
-                  {complete ? (
-                    <SquareIcon name="check" size={28} label="Done" />
-                  ) : (
-                    <span className="flex size-7 shrink-0 items-center justify-center border-2 border-edge text-sm font-bold tabular-nums">
-                      {i + 1}
-                    </span>
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    onClick={() => setOpen(isOpen ? '' : st.id)}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2"
+                  >
+                    {complete ? (
+                      <SquareIcon name="check" size={28} label="Done" />
+                    ) : (
+                      <span className="flex size-7 shrink-0 items-center justify-center border-2 border-edge text-sm font-bold tabular-nums">
+                        {i + 1}
+                      </span>
+                    )}
+                    <span className="flex-1 font-bold">{st.title}</span>
+                    {optional && !complete && <span className="chip">If needed</span>}
+                    {!complete && !optional && st.id === nextStep && (
+                      <span className="chip chip-orange">Next</span>
+                    )}
+                  </button>
+                  {isOpen && s && (
+                    <div className="grid gap-4 border-t-2 border-line px-4 py-4">
+                      <GuideText markdown={st.body} />
+                      <StepExtras
+                        step={st.id}
+                        settings={s}
+                        onSaved={() => void settings.reload()}
+                      />
+                      {proven[st.id] === undefined || !proven[st.id] ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm w-fit"
+                          onClick={() => toggleDone(st.id)}
+                        >
+                          {done.includes(st.id) ? 'Mark as not done' : 'I’ve done this'}
+                        </button>
+                      ) : null}
+                    </div>
                   )}
-                  <span className="flex-1 font-bold">{st.title}</span>
-                  {optional && !complete && <span className="chip">If needed</span>}
-                  {!complete && !optional && st.id === nextStep && (
-                    <span className="chip chip-orange">Next</span>
-                  )}
-                </button>
-                {isOpen && s && (
-                  <div className="grid gap-4 border-t-2 border-line px-4 py-4">
-                    <GuideText markdown={st.body} />
-                    <StepExtras step={st.id} settings={s} onSaved={() => void settings.reload()} />
-                    {proven[st.id] === undefined || !proven[st.id] ? (
-                      <button
-                        type="button"
-                        className="btn btn-sm w-fit"
-                        onClick={() => toggleDone(st.id)}
-                      >
-                        {done.includes(st.id) ? 'Mark as not done' : 'I’ve done this'}
-                      </button>
-                    ) : null}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-        {guide.error && <FormError message="Couldn’t load the setup guide." />}
-      </section>
+                </li>
+              );
+            })}
+          </ol>
+          {guide.error && <FormError message="Couldn’t load the setup guide." />}
+        </section>
+      )}
     </Page>
+  );
+}
+
+/** The top of the Instagram page: connected accounts and every saved setting, checked. */
+function Overview({
+  settings: s,
+  onChange,
+  guideShown,
+  onToggleGuide,
+}: {
+  settings: InstagramSettings;
+  onChange: () => void;
+  guideShown: boolean;
+  onToggleGuide: () => void;
+}) {
+  const connected = s.accounts.filter((a) => a.status === 'connected');
+  const blocked = connected.some((a) => a.statusDetail?.includes('Allow access to messages'));
+  const rows: { label: string; ok: boolean | null; value: ReactNode }[] = [
+    {
+      label: 'Login',
+      ok: Boolean(s.loginMode),
+      value:
+        s.loginMode === 'unified'
+          ? `Unified login · Meta app ${s.metaAppId} · configuration ${s.configId}`
+          : s.loginMode === 'instagram'
+            ? `Instagram login · app ${s.instagramAppId}`
+            : 'Not set up yet',
+    },
+    {
+      label: 'Meta app secret',
+      ok: s.hasFacebookAppSecret,
+      value: s.hasFacebookAppSecret ? 'Saved, encrypted' : 'Not saved',
+    },
+    {
+      label: 'Webhooks',
+      ok: Boolean(s.webhookVerifiedAt),
+      value: s.webhookVerifiedAt
+        ? `Verified by Meta ${timeAgo(s.webhookVerifiedAt)}`
+        : 'Not verified yet',
+    },
+    {
+      label: 'Sending DMs',
+      ok: blocked ? false : s.lastSentAt ? true : null,
+      value: blocked
+        ? 'Instagram is blocking DMs from apps: see the account above'
+        : s.lastSentAt
+          ? `Instagram accepted a DM ${timeAgo(s.lastSentAt)}`
+          : 'No DM sent yet',
+    },
+    {
+      label: 'Events',
+      ok: s.lastWebhookAt ? true : null,
+      value: s.lastWebhookAt
+        ? `Last comment or message from Instagram ${timeAgo(s.lastWebhookAt)}`
+        : 'Nothing received yet',
+    },
+  ];
+  const mark = (ok: boolean | null) =>
+    ok === true ? (
+      <span className="text-success">✓</span>
+    ) : ok === false ? (
+      <span className="text-danger">✕</span>
+    ) : (
+      <span className="text-muted">•</span>
+    );
+
+  return (
+    <section aria-label="Instagram setup" className="grid gap-4">
+      {s.accounts.map((a) => (
+        <div key={a.id} className="card flex flex-wrap items-center gap-4">
+          <Avatar
+            name={a.username ?? a.igUserId}
+            size={48}
+            src={a.profilePictureUrl ?? undefined}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-lg font-bold">@{a.username ?? a.igUserId}</p>
+            <p className="text-[13px] text-muted">
+              {a.accountType === 'MEDIA_CREATOR'
+                ? 'Creator'
+                : a.accountType === 'BUSINESS'
+                  ? 'Business'
+                  : 'Professional'}{' '}
+              account · connected {timeAgo(a.connectedAt)}
+            </p>
+            {a.statusDetail && (
+              <p className="mt-1 text-[13px] font-bold text-danger">{a.statusDetail}</p>
+            )}
+          </div>
+          <span className={`chip ${a.status === 'connected' ? 'chip-success' : 'chip-danger'}`}>
+            {a.status === 'connected' ? 'Connected' : 'Needs attention'}
+          </span>
+          {a.status !== 'connected' && (
+            <a className="btn btn-sm" href="/api/instagram/connect">
+              Reconnect
+            </a>
+          )}
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={async () => {
+              if (
+                !confirm(
+                  `Disconnect @${a.username}? Flows stop answering on this account until you connect it again. Contacts and history stay.`,
+                )
+              )
+                return;
+              await api(`/instagram/accounts/${a.id}`, undefined, 'DELETE');
+              onChange();
+            }}
+          >
+            Disconnect
+          </button>
+        </div>
+      ))}
+
+      <div className="card grid gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-display text-display-sm font-bold">Setup</h2>
+          <div className="flex flex-wrap gap-2">
+            {canConnect(s) && (
+              <a className="btn btn-sm" href="/api/instagram/connect">
+                {connected.length ? 'Connect another account' : 'Connect Instagram'}
+              </a>
+            )}
+            <button type="button" className="btn btn-sm" onClick={onToggleGuide}>
+              {guideShown ? 'Hide setup guide' : 'Show setup guide'}
+            </button>
+          </div>
+        </div>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[14px]">
+          {rows.map((r) => (
+            <Fragment key={r.label}>
+              <dt className="flex items-center gap-2 font-bold">
+                {mark(r.ok)} {r.label}
+              </dt>
+              <dd className="break-words text-muted">{r.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+        <p className="text-[13px] text-muted">
+          To change a setting, open the setup guide: each step has its own form.
+        </p>
+      </div>
+    </section>
   );
 }
 
