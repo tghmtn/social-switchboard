@@ -3,7 +3,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { instagramAccounts, messages, type OutboundContent } from '../db/schema';
 import type { ChannelAdapter, SendResult } from '../runtime/channels';
-import { type Host, MetaError, replyToComment, sendMessage } from './graph';
+import { type Host, MESSAGES_OFF, MetaError, replyToComment, sendMessage } from './graph';
 import { accountFor, decryptOptional } from './settings';
 
 const DAY = 24 * 3_600_000;
@@ -150,6 +150,11 @@ export function instagramChannel(db: Db, appSecret: string): ChannelAdapter {
           const res = await sendMessage(account.igUserId, token, recipient, message, host);
           lastId = res.message_id ?? lastId;
         }
+        if (account.statusDetail === MESSAGES_OFF)
+          await db
+            .update(instagramAccounts)
+            .set({ statusDetail: null, updatedAt: new Date() })
+            .where(eq(instagramAccounts.id, account.id));
         return { status: 'sent', externalId: lastId };
       } catch (err) {
         if (err instanceof MetaError) {
@@ -157,6 +162,12 @@ export function instagramChannel(db: Db, appSecret: string): ChannelAdapter {
             await db
               .update(instagramAccounts)
               .set({ status: 'error', statusDetail: err.friendly, updatedAt: new Date() })
+              .where(eq(instagramAccounts.id, account.id));
+          } else if (err.messagesOff) {
+            // Still connected, but every DM will fail until the owner flips the switch: say so on Channels.
+            await db
+              .update(instagramAccounts)
+              .set({ statusDetail: MESSAGES_OFF, updatedAt: new Date() })
               .where(eq(instagramAccounts.id, account.id));
           }
           return { status: 'failed', error: err.friendly };

@@ -76,6 +76,8 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   let calls: Call[] = [];
   let assignedEmpty = false;
   let targetsEmpty = false;
+  let messagesOff = false;
+  let setups = 0;
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -124,7 +126,18 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       return json({ user_id: IG_ID, username: 'tgtest', account_type: 'MEDIA_CREATOR' });
     if (path.endsWith('/subscribed_apps')) return json({ success: true });
     if (path.endsWith('/messages'))
-      return json({ recipient_id: 'x', message_id: `mid.${calls.length}` });
+      return messagesOff
+        ? json(
+            {
+              error: {
+                message:
+                  'The account owner has disabled access to Instagram Direct Messaging Outside of Instagram App.',
+                code: 200,
+              },
+            },
+            400,
+          )
+        : json({ recipient_id: 'x', message_id: `mid.${calls.length}` });
     if (path.endsWith('/replies')) return json({ id: 'reply-1' });
     if (path === '/fan-igsid') return json({ username: 'fan_account' });
     return json({ error: { message: `unexpected ${path}`, code: 100 } }, 400);
@@ -183,10 +196,13 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     calls = [];
     assignedEmpty = false;
     targetsEmpty = false;
+    messagesOff = false;
     await db.execute(sql`truncate workspaces, users, webhook_events cascade`);
+    // Each test signs up a fresh owner; a new LAN address per test keeps under setup's rate limit.
     const res = await app.inject({
       method: 'POST',
       url: '/api/setup',
+      remoteAddress: `10.0.0.${++setups}`,
       payload: {
         firstName: 'Todd',
         email: 't@example.test',
@@ -433,6 +449,55 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(again.body).toEqual({ error: 'login_needed' });
   });
 
+  it('says what to switch on when Instagram blocks messages from apps', async () => {
+    await connect();
+    const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
+      name: 'Hello',
+      starter: 'blank',
+    });
+    await call('PUT', `/api/flows/${body.flow.id}/draft`, {
+      graph: {
+        nodes: [
+          { id: 'start', type: 'start' },
+          { id: 'a', type: 'message', data: { parts: [{ type: 'text', text: 'Hi!' }] } },
+        ],
+        edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'a' }],
+      },
+    });
+    await call('POST', `/api/flows/${body.flow.id}/publish`, {});
+    await call('POST', '/api/triggers', { flowId: body.flow.id, config: { type: 'comment' } });
+    const comment = (id: string, from: string) => ({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ID,
+          changes: [
+            {
+              field: 'comments',
+              value: { id, text: 'hi', from: { id: from }, media: { id: 'm1' } },
+            },
+          ],
+        },
+      ],
+    });
+    type Status = { accounts: { statusDetail: string | null }[] };
+
+    messagesOff = true;
+    await webhook(comment('c7', 'fan-a'));
+    await settled();
+    const [failed] = await db.select().from(messages).where(eq(messages.status, 'failed'));
+    expect(failed?.error).toContain('Allow access to messages');
+    const flagged = await call<Status>('GET', '/api/instagram/settings');
+    expect(flagged.body.accounts[0]?.statusDetail).toContain('Allow access to messages');
+
+    // Switched on: the next reply goes through and the warning clears.
+    messagesOff = false;
+    await webhook(comment('c8', 'fan-b'));
+    await settled();
+    const cleared = await call<Status>('GET', '/api/instagram/settings');
+    expect(cleared.body.accounts[0]?.statusDetail).toBeNull();
+  });
+
   it('rejects unsigned webhooks', async () => {
     await connect();
     const res = await webhook(
@@ -630,7 +695,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       'GET',
       '/api/guides/connect-instagram',
     );
-    expect(res.body.source).toBe('bundled');
+    expect(res.body).toMatchObject({ source: 'bundled' });
     expect(res.body.markdown).toMatch(/## step: webhooks \|/);
   });
 });

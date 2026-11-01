@@ -42,7 +42,10 @@ export const StepNode = memo(function StepNode({ data }: NodeProps<StepNodeType>
             <span className="text-muted">No triggers yet. Select this step to add a keyword.</span>
           ) : (
             data.triggers.map((t) => (
-              <span key={t} className="chip chip-lime w-fit max-w-full truncate">
+              <span
+                key={t}
+                className="chip chip-lime block w-fit max-w-full leading-snug break-words whitespace-normal"
+              >
                 {t}
               </span>
             ))

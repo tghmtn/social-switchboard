@@ -33,6 +33,10 @@ export function setHttp(impl: typeof fetch) {
   http = impl;
 }
 
+/** Shown when the account's "Allow access to messages" switch is off, so Instagram refuses every DM. */
+export const MESSAGES_OFF =
+  'Instagram is blocking messages from apps on this account. In the Instagram app, go to Settings → Messages and story replies → Message controls → Connected tools and turn on Allow access to messages.';
+
 export class MetaError extends Error {
   constructor(
     message: string,
@@ -42,8 +46,14 @@ export class MetaError extends Error {
     super(message);
   }
 
+  /** The account owner turned off third-party access to their DMs. */
+  get messagesOff(): boolean {
+    return /disabled access to Instagram Direct Messaging/i.test(this.message);
+  }
+
   /** What to tell a person, for the errors people actually hit. */
   get friendly(): string {
+    if (this.messagesOff) return MESSAGES_OFF;
     if (this.code === 190)
       return 'Instagram signed this app out. Reconnect the account on the Channels page.';
     if (this.subcode === 2534037)
