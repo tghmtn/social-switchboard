@@ -21,7 +21,7 @@ import { contactName } from './Contacts';
 import { ReplyForm } from './SavedReplies';
 
 // The inbox: the conversation list beside the open conversation (one at a time on a phone).
-// Both check back every few seconds while the tab is visible. The list's view, label and channel
+// Both check back every few seconds while the tab is visible. The list's view, tag and channel
 // live in the address, so going into a conversation and back keeps them.
 
 const VIEWS: { id: InboxView; label: string }[] = [
@@ -127,8 +127,8 @@ export function Inbox() {
               type="button"
               className={`btn shrink-0 gap-1 px-3 ${filters ? 'bg-surface-2 shadow-hard' : ''}`}
               aria-expanded={filtering}
-              aria-label="Filter by label or channel"
-              title="Filter by label or channel"
+              aria-label="Filter by tag or channel"
+              title="Filter by tag or channel"
               onClick={() => setFiltering((f) => !f)}
             >
               <Icon icon={Funnel} size={20} />
@@ -139,11 +139,11 @@ export function Inbox() {
             <div className="grid grid-cols-2 gap-2">
               <select
                 className="input"
-                aria-label="Label"
+                aria-label="Tag"
                 value={tag}
                 onChange={(e) => setParam('tag', e.target.value)}
               >
-                <option value="">All labels</option>
+                <option value="">All tags</option>
                 {tags.data?.tags.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
@@ -1007,7 +1007,7 @@ function SnoozeButton({ id, onChange }: { id: string; onChange: () => void }) {
   );
 }
 
-/** The contact's labels (tags): add from the ones in use or a new one, remove with ×. */
+/** The contact's tags: add one in use or a new one, remove with ×. */
 function Labels({
   contactId,
   tags,
@@ -1032,7 +1032,7 @@ function Labels({
       setAdding(false);
       onChange();
     } catch {
-      setError('Couldn’t add that label. Labels can be up to 50 characters.');
+      setError('Couldn’t add that tag. Tags can be up to 50 characters.');
     }
   };
   return (
@@ -1042,7 +1042,7 @@ function Labels({
           {t}
           <button
             type="button"
-            aria-label={`Remove the label ${t}`}
+            aria-label={`Remove the tag ${t}`}
             className="-my-1 px-1.5 py-1 font-bold hover:text-danger"
             onClick={async () => {
               await api(
@@ -1062,10 +1062,10 @@ function Labels({
           <input
             className="input w-40 py-1 text-[14px]"
             list={`labels-${contactId}`}
-            aria-label="Label"
-            placeholder="Label"
+            aria-label="Tag"
+            placeholder="Tag"
             maxLength={50}
-            // biome-ignore lint/a11y/noAutofocus: opened by a tap on "+ Label"
+            // biome-ignore lint/a11y/noAutofocus: opened by a tap on "+ Tag"
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -1089,7 +1089,7 @@ function Labels({
         </form>
       ) : (
         <button type="button" className="linkbtn" onClick={() => setAdding(true)}>
-          + Label
+          + Tag
         </button>
       )}
       <FormError message={error} />

@@ -225,7 +225,9 @@ function DataSection() {
             Contact fields
           </h2>
           <p className="mt-1 text-[15px] text-muted">
-            Extra details you collect in flows, like an interest or a budget. First name, last name,
+            Details you save about each person, like an interest or a budget. Flows fill them in (an{' '}
+            <b>Ask</b> step saves the answer, an <b>AI conversation</b> picks them out of the chat),
+            and messages can use them, like <code>{'{{first_name}}'}</code>. First name, last name,
             email and phone are built in.
           </p>
         </div>
@@ -289,44 +291,105 @@ function DataSection() {
       </section>
 
       <section aria-labelledby="tags-h" className="grid gap-4">
-        <h2 id="tags-h" className="font-display text-display-sm font-bold">
-          Tags
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {tags.data?.tags.map((t) => (
-            <span key={t.id} className="chip gap-2 py-1 text-[12px]">
-              {t.name} <span className="tabular-nums text-muted">{t.contacts}</span>
-              <button
-                type="button"
-                aria-label={`Delete tag ${t.name}`}
-                className="-my-2 -mr-1 px-1.5 py-2 font-bold hover:text-danger"
-                onClick={async () => {
-                  if (
-                    !confirm(
-                      `Delete the tag "${t.name}"? It’s removed from ${t.contacts} contact(s).`,
+        <div>
+          <h2 id="tags-h" className="font-display text-display-sm font-bold">
+            Tags
+          </h2>
+          <p className="mt-1 text-[15px] text-muted">
+            Short labels you put on people to sort them into groups, like <i>vip</i>,{' '}
+            <i>workshop-lead</i> or <i>guide-sent</i>. A person can have any number of them.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Explainer title="How people get tagged">
+            <li>
+              <b>By a flow</b>, automatically: an <b>Actions</b> step with “Add a tag”. For example,
+              tag everyone who asks for your guide.
+            </li>
+            <li>
+              <b>By hand</b>: <b>+ Tag</b> on a conversation in the Inbox, or on a person’s page in
+              Contacts.
+            </li>
+          </Explainer>
+          <Explainer title="What tags are for">
+            <li>
+              <b>Finding people</b>: filter the Inbox or Contacts to everyone with a tag.
+            </li>
+            <li>
+              <b>Steering flows</b>: a <b>Condition</b> step can check for a tag, so someone who
+              already got the guide isn’t sent it twice.
+            </li>
+          </Explainer>
+        </div>
+
+        <div className="grid gap-2">
+          <h3 className="font-bold">Your tags</h3>
+          <div className="flex flex-wrap gap-2">
+            {tags.data?.tags.map((t) => (
+              <span key={t.id} className="chip gap-2 py-1 text-[12px]">
+                <Link
+                  to={`/contacts?tag=${encodeURIComponent(t.name)}`}
+                  className="text-ink no-underline hover:underline"
+                  title={`See who’s tagged ${t.name}`}
+                >
+                  {t.name}{' '}
+                  <span className="text-muted tabular-nums">
+                    · {t.contacts} {t.contacts === 1 ? 'person' : 'people'}
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  aria-label={`Delete tag ${t.name}`}
+                  className="-my-2 -mr-1 px-1.5 py-2 font-bold hover:text-danger"
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        `Delete the tag "${t.name}"? It’s removed from ${t.contacts} ${t.contacts === 1 ? 'person' : 'people'}.`,
+                      )
                     )
-                  )
-                    return;
-                  await api(`/tags/${t.id}`, undefined, 'DELETE');
-                  void tags.reload();
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          {tags.data?.tags.length === 0 && (
-            <p className="text-muted">No tags yet. Flows add them as people move through.</p>
+                      return;
+                    await api(`/tags/${t.id}`, undefined, 'DELETE');
+                    void tags.reload();
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {tags.data?.tags.length === 0 && (
+              <p className="text-muted">
+                None yet. Tags show up here as your flows and your team add them.
+              </p>
+            )}
+          </div>
+          {Boolean(tags.data?.tags.length) && (
+            <p className="text-[13px] text-muted">Tap a tag to see who has it.</p>
           )}
         </div>
-        <form onSubmit={addTag} className="flex max-w-md items-end gap-3">
-          <Field label="New tag" name="name" required className="flex-1" placeholder="vip" />
-          <button type="submit" className="btn">
-            Add
-          </button>
+        <form onSubmit={addTag} className="grid max-w-md gap-1.5">
+          <div className="flex items-end gap-3">
+            <Field label="New tag" name="name" required className="flex-1" placeholder="vip" />
+            <button type="submit" className="btn">
+              Add
+            </button>
+          </div>
+          <p className="text-[13px] text-muted">
+            Rarely needed: flows and the Inbox create tags as they use them. Adding one here just
+            has it ready to pick.
+          </p>
+          <FormError message={tagError} />
         </form>
-        <FormError message={tagError} />
       </section>
     </>
+  );
+}
+
+/** A small "how this works" box: a title and a few points. */
+function Explainer({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="grid content-start gap-2 border-2 border-line bg-surface p-4">
+      <h3 className="text-[15px] font-bold">{title}</h3>
+      <ul className="grid list-disc gap-1.5 pl-5 text-[14px]">{children}</ul>
+    </div>
   );
 }
