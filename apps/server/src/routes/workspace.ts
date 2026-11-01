@@ -10,6 +10,7 @@ import {
   NOTICE_KINDS,
   notificationPrefs,
   pushSubscriptions,
+  SMS_PROVIDERS,
   users,
   workspaceMembers,
   workspaces,
@@ -24,6 +25,8 @@ import {
   sendEmail,
   senders,
   sendSms,
+  smsChoice,
+  smsReady,
 } from '../notify';
 import { deviceLabel, vapidKeys } from '../webpush';
 import { conflict, notFound, requireAdmin, requireWorkspace, who } from './guard';
@@ -68,6 +71,9 @@ export const workspaceRoutes =
             smtpPassEnc: workspaces.smtpPassEnc,
             twilio: workspaces.twilio,
             twilioTokenEnc: workspaces.twilioTokenEnc,
+            telnyx: workspaces.telnyx,
+            telnyxKeyEnc: workspaces.telnyxKeyEnc,
+            smsProvider: workspaces.smsProvider,
           })
           .from(workspaces)
           .where(eq(workspaces.id, workspace.id)),
@@ -77,7 +83,15 @@ export const workspaceRoutes =
       ]);
       return {
         email: ws?.smtp ? { ...ws.smtp, hasPassword: Boolean(ws.smtpPassEnc) } : null,
-        sms: ws?.twilio ? { ...ws.twilio, hasToken: Boolean(ws.twilioTokenEnc) } : null,
+        sms: ws
+          ? {
+              /** The one in use (or that will be, once it's set up). */
+              provider: smsChoice(ws),
+              ready: smsReady(ws),
+              twilio: ws.twilio ? { ...ws.twilio, hasToken: Boolean(ws.twilioTokenEnc) } : null,
+              telnyx: ws.telnyx ? { ...ws.telnyx, hasKey: Boolean(ws.telnyxKeyEnc) } : null,
+            }
+          : null,
         mine: {
           email: mine?.email ?? null,
           accountEmail: account?.email ?? '',
@@ -137,8 +151,31 @@ export const workspaceRoutes =
       return { ok: true };
     });
 
-    /** Text-message alerts: the Twilio account they're sent from. */
-    app.put('/settings/notifications/sms', async (req, reply) => {
+    /** Text-message alerts: a Twilio or Telnyx account. Saving one puts it in use; both are kept. */
+    const smsState = async (workspaceId: string) => {
+      const [ws] = await db
+        .select({
+          smsProvider: workspaces.smsProvider,
+          twilio: workspaces.twilio,
+          twilioTokenEnc: workspaces.twilioTokenEnc,
+          telnyx: workspaces.telnyx,
+          telnyxKeyEnc: workspaces.telnyxKeyEnc,
+        })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId));
+      if (!ws) throw notFound('Workspace');
+      return ws;
+    };
+    const phone = (provider: string) =>
+      z
+        .string()
+        .trim()
+        .regex(
+          /^\+[1-9]\d{6,14}$/,
+          `Use your ${provider} number with the country code, like +18015551234.`,
+        );
+
+    app.put('/settings/notifications/sms/twilio', async (req, reply) => {
       const { workspace } = requireAdmin(req);
       const body = z
         .object({
@@ -160,26 +197,70 @@ export const workspaceRoutes =
             ),
         })
         .parse(req.body);
-      const [ws] = await db
-        .select({ tokenEnc: workspaces.twilioTokenEnc })
-        .from(workspaces)
-        .where(eq(workspaces.id, workspace.id));
-      if (!body.token && !ws?.tokenEnc)
+      const ws = await smsState(workspace.id);
+      if (!body.token && !ws.twilioTokenEnc)
         return reply.code(400).send({ error: 'Enter the auth token.' });
       await db
         .update(workspaces)
         .set({
           twilio: { accountSid: body.accountSid, from: body.from },
           ...(body.token ? { twilioTokenEnc: encryptSecret(config.appSecret, body.token) } : {}),
+          smsProvider: 'twilio',
         })
         .where(eq(workspaces.id, workspace.id));
       return { ok: true };
     });
-    app.delete('/settings/notifications/sms', async (req) => {
+
+    app.put('/settings/notifications/sms/telnyx', async (req, reply) => {
       const { workspace } = requireAdmin(req);
+      const body = z
+        .object({
+          /** A new API key; leave it out to keep the saved one. */
+          apiKey: z.string().trim().min(20, 'Paste the whole API key.').max(300).optional(),
+          from: phone('Telnyx'),
+        })
+        .parse(req.body);
+      const ws = await smsState(workspace.id);
+      if (!body.apiKey && !ws.telnyxKeyEnc)
+        return reply.code(400).send({ error: 'Enter the API key.' });
       await db
         .update(workspaces)
-        .set({ twilio: null, twilioTokenEnc: null })
+        .set({
+          telnyx: { from: body.from },
+          ...(body.apiKey ? { telnyxKeyEnc: encryptSecret(config.appSecret, body.apiKey) } : {}),
+          smsProvider: 'telnyx',
+        })
+        .where(eq(workspaces.id, workspace.id));
+      return { ok: true };
+    });
+
+    /** Which provider sends texts. */
+    app.put('/settings/notifications/sms', async (req) => {
+      const { workspace } = requireAdmin(req);
+      const { provider } = z.object({ provider: z.enum(SMS_PROVIDERS) }).parse(req.body);
+      await db
+        .update(workspaces)
+        .set({ smsProvider: provider })
+        .where(eq(workspaces.id, workspace.id));
+      return { ok: true };
+    });
+
+    /** Forgets a provider. If it was in use, the other one takes over when it's set up. */
+    app.delete('/settings/notifications/sms/:provider', async (req) => {
+      const { workspace } = requireAdmin(req);
+      const { provider } = z.object({ provider: z.enum(SMS_PROVIDERS) }).parse(req.params);
+      const ws = await smsState(workspace.id);
+      const other = provider === 'twilio' ? 'telnyx' : 'twilio';
+      await db
+        .update(workspaces)
+        .set({
+          ...(provider === 'twilio'
+            ? { twilio: null, twilioTokenEnc: null }
+            : { telnyx: null, telnyxKeyEnc: null }),
+          ...(ws.smsProvider === provider
+            ? { smsProvider: smsReady(ws)[other] ? other : null }
+            : {}),
+        })
         .where(eq(workspaces.id, workspace.id));
       return { ok: true };
     });
@@ -298,10 +379,16 @@ export const workspaceRoutes =
 
     /** A sender's saved secret, for the eye button (owners and admins). */
     app.post('/settings/notifications/reveal', async (req, reply) => {
-      const { which } = z.object({ which: z.enum(['email', 'sms']) }).parse(req.body ?? {});
+      const { which } = z
+        .object({ which: z.enum(['email', 'twilio', 'telnyx']) })
+        .parse(req.body ?? {});
       const { workspace } = requireAdmin(req);
       const [ws] = await db
-        .select({ email: workspaces.smtpPassEnc, sms: workspaces.twilioTokenEnc })
+        .select({
+          email: workspaces.smtpPassEnc,
+          twilio: workspaces.twilioTokenEnc,
+          telnyx: workspaces.telnyxKeyEnc,
+        })
         .from(workspaces)
         .where(eq(workspaces.id, workspace.id));
       const enc = ws?.[which];
@@ -350,10 +437,10 @@ export const workspaceRoutes =
             alertEmail(me.email, message.title, message.text, message.click, config.publicUrl),
           );
         } else {
-          if (!from.twilio)
+          if (!from.sms)
             return reply.code(409).send({ error: 'An admin needs to set up text messages first.' });
           if (!me?.phone) return reply.code(409).send({ error: 'Save your phone number first.' });
-          await sendSms(from.twilio, me.phone, `${message.title}: ${message.text}`);
+          await sendSms(from.sms, me.phone, `${message.title}: ${message.text}`);
         }
       } catch (err) {
         return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });

@@ -33,6 +33,10 @@ export type SmtpSettings = {
   fromName: string;
 };
 export type TwilioSettings = { accountSid: string; from: string };
+export type TelnyxSettings = { from: string };
+/** Who sends text-message alerts: both can be saved, one is in use. */
+export const SMS_PROVIDERS = ['twilio', 'telnyx'] as const;
+export type SmsProvider = (typeof SMS_PROVIDERS)[number];
 /** What the app can alert people about. */
 export const NOTICE_KINDS = [
   'handoff',
@@ -67,6 +71,11 @@ export const workspaces = pgTable('workspaces', {
   /** Text-message alerts go out through this Twilio account; its auth token is encrypted. */
   twilio: jsonb('twilio').$type<TwilioSettings | null>(),
   twilioTokenEnc: text('twilio_token_enc'),
+  /** Or this Telnyx number; its API key is encrypted. */
+  telnyx: jsonb('telnyx').$type<TelnyxSettings | null>(),
+  telnyxKeyEnc: text('telnyx_key_enc'),
+  /** Which of the two sends texts. Null: whichever is set up (Twilio first). */
+  smsProvider: text('sms_provider').$type<SmsProvider>(),
   /**
    * AI, bring your own key. Both providers' keys (encrypted) and models can be saved; aiProvider
    * picks the one every AI feature uses. aiModel and aiKeyEnc are Anthropic's.

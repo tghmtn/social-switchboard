@@ -9,7 +9,9 @@ import {
   type NoticeKind,
   notificationPrefs,
   pushSubscriptions,
+  type SmsProvider,
   type SmtpSettings,
+  type TelnyxSettings,
   type TwilioSettings,
   users,
   workspaceMembers,
@@ -18,7 +20,8 @@ import {
 import { isGone, sendWebPush } from './webpush';
 
 // Alerts when a conversation needs someone. Switchboard's own notifications need no setup (each
-// person turns them on per device); admins set up email (an SMTP server) and texts (Twilio); each
+// person turns them on per device); admins set up email (an SMTP server) and texts (Twilio or
+// Telnyx); each
 // teammate picks which events reach them and how. Best effort, and never in the way of handling
 // the message.
 
@@ -110,14 +113,40 @@ export function setMailer(m: Mailer) {
 export const sendEmail = (smtp: SmtpSettings & { password?: string }, mail: Mail) =>
   mailer(smtp, mail);
 
-// ------------------------------------------------------------------ texts (Twilio)
+// ------------------------------------------------------------------ texts (Twilio or Telnyx)
 
-/** Sends one text through Twilio. `from` is a phone number, or a Messaging Service SID (MG…). */
-export async function sendSms(
-  twilio: TwilioSettings & { token: string },
-  to: string,
-  body: string,
-) {
+/** The account texts go out from, secrets decrypted. */
+export type SmsSender =
+  | ({ provider: 'twilio'; token: string } & TwilioSettings)
+  | ({ provider: 'telnyx'; apiKey: string } & TelnyxSettings);
+
+type SmsColumns = {
+  smsProvider: SmsProvider | null;
+  twilio: TwilioSettings | null;
+  twilioTokenEnc: string | null;
+  telnyx: TelnyxSettings | null;
+  telnyxKeyEnc: string | null;
+};
+
+/** Which providers are fully set up. */
+export const smsReady = (ws: SmsColumns): Record<SmsProvider, boolean> => ({
+  twilio: Boolean(ws.twilio && ws.twilioTokenEnc),
+  telnyx: Boolean(ws.telnyx && ws.telnyxKeyEnc),
+});
+
+/** The provider picked to send texts: the chosen one, or whichever is set up (Twilio first). */
+export function smsChoice(ws: SmsColumns): SmsProvider | null {
+  const ready = smsReady(ws);
+  return ws.smsProvider ?? (ready.twilio ? 'twilio' : ready.telnyx ? 'telnyx' : null);
+}
+
+/** Sends one text through whichever provider is in use. Throws on failure (the test shows why). */
+export function sendSms(sender: SmsSender, to: string, body: string) {
+  return sender.provider === 'telnyx' ? sendTelnyx(sender, to, body) : sendTwilio(sender, to, body);
+}
+
+/** Twilio: `from` is a phone number, or a Messaging Service SID (MG…). */
+async function sendTwilio(twilio: TwilioSettings & { token: string }, to: string, body: string) {
   const res = await http(
     `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(twilio.accountSid)}/Messages.json`,
     {
@@ -142,6 +171,26 @@ export async function sendSms(
   }
 }
 
+/** Telnyx's Messaging API: a number on the account, and an API key. */
+async function sendTelnyx(telnyx: TelnyxSettings & { apiKey: string }, to: string, body: string) {
+  const res = await http('https://api.telnyx.com/v2/messages', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${telnyx.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ from: telnyx.from, to, text: body }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => null)) as {
+      errors?: { title?: string; detail?: string }[];
+    } | null;
+    const why = j?.errors?.[0]?.detail || j?.errors?.[0]?.title;
+    throw new Error(`Telnyx answered ${res.status}${why ? `: ${why}` : '.'}`);
+  }
+}
+
 // ------------------------------------------------------------------ routing
 
 type Deps = {
@@ -159,16 +208,23 @@ export async function senders(db: Db, appSecret: string, workspaceId: string) {
       smtpPassEnc: workspaces.smtpPassEnc,
       twilio: workspaces.twilio,
       twilioTokenEnc: workspaces.twilioTokenEnc,
+      telnyx: workspaces.telnyx,
+      telnyxKeyEnc: workspaces.telnyxKeyEnc,
+      smsProvider: workspaces.smsProvider,
     })
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId));
   const dec = (enc: string | null | undefined) => (enc ? decryptSecret(appSecret, enc) : undefined);
+  const provider = ws ? smsChoice(ws) : null;
+  let sms: SmsSender | undefined;
+  if (provider === 'twilio' && ws?.twilio && ws.twilioTokenEnc)
+    sms = { provider, ...ws.twilio, token: dec(ws.twilioTokenEnc) ?? '' };
+  if (provider === 'telnyx' && ws?.telnyx && ws.telnyxKeyEnc)
+    sms = { provider, ...ws.telnyx, apiKey: dec(ws.telnyxKeyEnc) ?? '' };
   return {
     smtp: ws?.smtp ? { ...ws.smtp, password: dec(ws.smtpPassEnc) } : undefined,
-    twilio:
-      ws?.twilio && ws.twilioTokenEnc
-        ? { ...ws.twilio, token: dec(ws.twilioTokenEnc) ?? '' }
-        : undefined,
+    /** The text-message sender in use, if it's set up. */
+    sms,
   };
 }
 
@@ -275,10 +331,10 @@ async function send(deps: Deps, n: Notice) {
         to: 'email',
         job: sendEmail(from.smtp, alertEmail(r.email, title, text, link, deps.publicUrl)),
       });
-    if (ways.includes('sms') && from.twilio && r.phone)
+    if (ways.includes('sms') && from.sms && r.phone)
       jobs.push({
         to: 'text',
-        job: sendSms(from.twilio, r.phone, `${`${title}: ${text}`.slice(0, 280)}\n${link}`),
+        job: sendSms(from.sms, r.phone, `${`${title}: ${text}`.slice(0, 280)}\n${link}`),
       });
   }
   const results = await Promise.allSettled(jobs.map((j) => j.job));

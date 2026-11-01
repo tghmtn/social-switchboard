@@ -33,8 +33,10 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
       pushes.push({
         url: String(input),
         headers: init?.headers as Record<string, string>,
-        // Twilio takes a form.
-        body: Object.fromEntries(new URLSearchParams(String(init?.body))),
+        // Twilio takes a form, Telnyx JSON.
+        body: String(init?.body).startsWith('{')
+          ? JSON.parse(String(init?.body))
+          : Object.fromEntries(new URLSearchParams(String(init?.body))),
       });
       return new Response('{}');
     });
@@ -270,7 +272,7 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     ).toBe(200);
     expect(
       (
-        await call(owner, 'PUT', '/api/settings/notifications/sms', {
+        await call(owner, 'PUT', '/api/settings/notifications/sms/twilio', {
           accountSid: `AC${'0'.repeat(32)}`,
           token: 'twilio-auth-token-0123456789',
           from: '+18015550000',
@@ -287,12 +289,13 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
     ).toBe(200);
     const settings = await call<{
       email: { host: string; hasPassword: boolean };
-      sms: { hasToken: boolean };
+      sms: { provider: string; twilio: { hasToken: boolean } };
       mine: { events: Record<string, string[]>; accountEmail: string };
     }>(owner, 'GET', '/api/settings/notifications');
     expect(settings.body).toMatchObject({
       email: { host: 'smtp.example.test', hasPassword: true },
-      sms: { hasToken: true },
+      // Saving a texts provider puts it in use.
+      sms: { provider: 'twilio', twilio: { hasToken: true } },
       mine: {
         accountEmail: 'owner@example.test',
         events: {
@@ -370,5 +373,107 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
         title: '@mug_buyer needs a person',
       }),
     ]);
+  });
+
+  it('sends texts through Telnyx instead of Twilio when it’s the one in use', async () => {
+    type Sms = {
+      provider: string | null;
+      ready: Record<string, boolean>;
+      telnyx: { from: string; hasKey: boolean } | null;
+    };
+    const sms = async () =>
+      (await call<{ sms: Sms }>(owner, 'GET', '/api/settings/notifications')).body.sms;
+    await call(owner, 'PUT', '/api/settings/notifications/mine', { phone: '+18015551234' });
+    expect(await sms()).toMatchObject({ provider: null, telnyx: null });
+    expect(
+      (await call(owner, 'POST', '/api/settings/notifications/test', { to: 'sms' })).status,
+    ).toBe(409);
+
+    // A key is needed, and the number has a country code.
+    expect(
+      (
+        await call(owner, 'PUT', '/api/settings/notifications/sms/telnyx', {
+          from: '+18015550000',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(owner, 'PUT', '/api/settings/notifications/sms/telnyx', {
+          apiKey: 'KEY0123456789abcdefghijklmnop',
+          from: '801-555-0000',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(owner, 'PUT', '/api/settings/notifications/sms/telnyx', {
+          apiKey: 'KEY0123456789abcdefghijklmnop',
+          from: '+18015550000',
+        })
+      ).status,
+    ).toBe(200);
+    expect(await sms()).toMatchObject({
+      provider: 'telnyx',
+      ready: { telnyx: true, twilio: false },
+      telnyx: { from: '+18015550000', hasKey: true },
+    });
+    expect(
+      (await call(owner, 'POST', '/api/settings/notifications/reveal', { which: 'telnyx' })).body,
+    ).toEqual({ value: 'KEY0123456789abcdefghijklmnop' });
+
+    expect(
+      (await call(owner, 'POST', '/api/settings/notifications/test', { to: 'sms' })).status,
+    ).toBe(200);
+    expect(pushes.at(-1)).toMatchObject({
+      url: 'https://api.telnyx.com/v2/messages',
+      headers: { authorization: 'Bearer KEY0123456789abcdefghijklmnop' },
+      body: { from: '+18015550000', to: '+18015551234' },
+    });
+
+    // Saving Twilio puts it in use; Telnyx stays saved to switch back to.
+    await call(owner, 'PUT', '/api/settings/notifications/sms/twilio', {
+      accountSid: `AC${'0'.repeat(32)}`,
+      token: 'twilio-auth-token-0123456789',
+      from: '+18015559999',
+    });
+    expect(await sms()).toMatchObject({ provider: 'twilio', ready: { telnyx: true } });
+    await call(owner, 'POST', '/api/settings/notifications/test', { to: 'sms' });
+    expect(pushes.at(-1)?.url).toMatch(/^https:\/\/api\.twilio\.com\//);
+
+    // Removing the one in use hands texts to the other.
+    await call(owner, 'DELETE', '/api/settings/notifications/sms/twilio');
+    expect(await sms()).toMatchObject({ provider: 'telnyx', ready: { twilio: false } });
+
+    // Telnyx's own reason comes through when it refuses.
+    setNotifyHttp(async () =>
+      Response.json(
+        { errors: [{ title: 'Invalid source number', detail: 'The from number isn’t yours.' }] },
+        { status: 422 },
+      ),
+    );
+    try {
+      const failed = await call<{ error: string }>(
+        owner,
+        'POST',
+        '/api/settings/notifications/test',
+        {
+          to: 'sms',
+        },
+      );
+      expect(failed.status).toBe(502);
+      expect(failed.body.error).toBe('Telnyx answered 422: The from number isn’t yours.');
+    } finally {
+      setNotifyHttp(async (input, init) => {
+        pushes.push({
+          url: String(input),
+          headers: init?.headers as Record<string, string>,
+          body: String(init?.body).startsWith('{')
+            ? JSON.parse(String(init?.body))
+            : Object.fromEntries(new URLSearchParams(String(init?.body))),
+        });
+        return new Response('{}');
+      });
+    }
   });
 });

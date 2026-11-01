@@ -8,6 +8,10 @@ import { Field, FormError, SecretField, Select, timeAgo } from '../ui';
 // and texts (a Twilio account).
 
 type Channel = 'browser' | 'email' | 'sms';
+type SmsProvider = 'twilio' | 'telnyx';
+const SMS_NAMES: Record<SmsProvider, string> = { twilio: 'Twilio', telnyx: 'Telnyx' };
+/** Texts can go out: the provider in use is set up. */
+const smsReady = (s: Settings) => Boolean(s.sms?.provider && s.sms.ready[s.sms.provider]);
 type Device = {
   id: string;
   label: string;
@@ -25,7 +29,13 @@ type Settings = {
     fromName: string;
     hasPassword: boolean;
   } | null;
-  sms: { accountSid: string; from: string; hasToken: boolean } | null;
+  sms: {
+    /** The one in use (or that will be, once it's set up). */
+    provider: SmsProvider | null;
+    ready: Record<SmsProvider, boolean>;
+    twilio: { accountSid: string; from: string; hasToken: boolean } | null;
+    telnyx: { from: string; hasKey: boolean } | null;
+  } | null;
   mine: {
     email: string | null;
     accountEmail: string;
@@ -201,7 +211,7 @@ function Result({ message }: { message: Message }) {
   );
 }
 
-const reveal = (which: 'email' | 'sms') => async () =>
+const reveal = (which: 'email' | SmsProvider) => async () =>
   (await api<{ value: string }>('/settings/notifications/reveal', { which })).value;
 
 export function NotificationsSection({ me }: { me: Me }) {
@@ -387,7 +397,7 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
   const ready: Record<Channel, string | undefined> = {
     browser: s.mine.devices.length ? undefined : 'Turn notifications on for a device above.',
     email: s.email ? undefined : 'An owner or admin needs to set up email.',
-    sms: !s.sms
+    sms: !smsReady(s)
       ? 'An owner or admin needs to set up text messages.'
       : phone.trim()
         ? undefined
@@ -526,7 +536,7 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
             Test email
           </button>
         )}
-        {s.sms && s.mine.phone && (
+        {smsReady(s) && s.mine.phone && (
           <button type="button" className="btn" onClick={() => void test('sms')}>
             Test text
           </button>
@@ -863,101 +873,213 @@ function SmsSender({
   isAdmin: boolean;
   reload: () => Promise<void>;
 }) {
-  const saved = s.sms;
-  const [message, setMessage] = useState<Message>();
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  async function save(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const token = String(form.get('token') ?? '').trim();
-    setMessage(undefined);
-    setErrors({});
-    try {
-      await api(
-        '/settings/notifications/sms',
-        {
-          accountSid: String(form.get('accountSid') ?? '').trim(),
-          ...(token && { token }),
-          from: String(form.get('from') ?? '').trim(),
-        },
-        'PUT',
-      );
-      await reload();
-      setMessage({ ok: true, text: 'Saved. Add your phone in My alerts to test it.' });
-    } catch (err) {
-      if (err instanceof ApiError) setErrors(err.fieldErrors());
-      setMessage({ ok: false, text: errorText(err, 'Couldn’t save.') });
-    }
-  }
+  const sms = s.sms;
+  const ready = smsReady(s);
+  const inUse = ready ? sms?.provider : undefined;
+  // Opens on the service in use; picking another shows its form (saving it switches texts to it).
+  const [service, setService] = useState<SmsProvider | ''>(inUse ?? '');
 
   return (
-    <SenderCard
-      title="Text messages (Twilio)"
-      status={saved ? 'Set up' : 'Not set up'}
-      ok={Boolean(saved)}
-    >
-      <p className="text-[14px] text-muted">
-        Texts go out from your own{' '}
-        <a href="https://www.twilio.com" target="_blank" rel="noopener noreferrer">
-          Twilio
-        </a>{' '}
-        account, which charges per text. Sending to US numbers needs a number registered for
-        business texting first; Twilio’s console walks you through it.
-      </p>
+    <SenderCard title="Text messages" status={inUse ? SMS_NAMES[inUse] : 'Not set up'} ok={ready}>
       {isAdmin ? (
-        <form onSubmit={save} className="grid gap-3" autoComplete="off">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
-              label="Account SID"
-              name="accountSid"
-              defaultValue={saved?.accountSid ?? ''}
-              placeholder="AC…"
-              error={errors.accountSid}
-              hint="Twilio console → Account Info."
-            />
-            <SecretField
-              label="Auth token"
-              name="token"
-              saved={Boolean(saved?.hasToken)}
-              hint={saved?.hasToken ? 'Saved and encrypted.' : 'Next to the Account SID.'}
-              error={errors.token}
-              reveal={reveal('sms')}
-            />
-            <Field
-              label="Send from"
-              name="from"
-              defaultValue={saved?.from ?? ''}
-              placeholder="+18015550000"
-              error={errors.from}
-              hint="Your Twilio number with the country code, or a Messaging Service SID (MG…)."
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" className="btn btn-primary">
-              Save
-            </button>
-            {saved && (
-              <button
-                type="button"
-                className="linkbtn text-danger"
-                onClick={async () => {
-                  if (!confirm('Turn off text alerts for everyone?')) return;
-                  await api('/settings/notifications/sms', undefined, 'DELETE');
-                  await reload();
-                }}
-              >
-                Remove
-              </button>
-            )}
-          </div>
-          <Result message={message} />
-        </form>
+        <div className="grid gap-4">
+          <Select
+            label="Which service do you send texts with?"
+            value={service}
+            onChange={(e) => setService(e.target.value as SmsProvider | '')}
+          >
+            <option value="">Choose one…</option>
+            <option value="twilio">Twilio</option>
+            <option value="telnyx">Telnyx</option>
+          </Select>
+          <p className="text-[14px] text-muted">
+            Texts go out from your own account and cost a little per text, so they stay off for
+            everyone until they pick them in My alerts. Texting US numbers needs a number registered
+            for business texting first (10DLC, or a verified toll-free number); both services walk
+            you through it.
+          </p>
+          {service && inUse && service !== inUse && (
+            <p className="text-[14px] font-bold">
+              Texts go out through {SMS_NAMES[inUse]} now. Saving {SMS_NAMES[service]} switches them
+              to it.
+            </p>
+          )}
+          {service === 'twilio' && <TwilioForm settings={s} reload={reload} />}
+          {service === 'telnyx' && <TelnyxForm settings={s} reload={reload} />}
+        </div>
       ) : (
         <p className="text-[14px]">
-          {saved ? `Texts come from ${saved.from}.` : 'An owner or admin can set this up.'}
+          {inUse
+            ? `Texts come from ${sms?.[inUse]?.from} (${SMS_NAMES[inUse]}).`
+            : 'An owner or admin can set this up.'}
         </p>
       )}
     </SenderCard>
+  );
+}
+
+/** Saving one provider's account; Remove forgets it (texts move to the other, if it's set up). */
+function useProviderSave(provider: SmsProvider, reload: () => Promise<void>) {
+  const [message, setMessage] = useState<Message>();
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  async function save(body: Record<string, string>) {
+    setMessage(undefined);
+    setErrors({});
+    setBusy(true);
+    try {
+      await api(`/settings/notifications/sms/${provider}`, body, 'PUT');
+      await reload();
+      setMessage({ ok: true, text: 'Saved. Add your phone in My alerts and send a test text.' });
+    } catch (err) {
+      if (err instanceof ApiError) setErrors(err.fieldErrors());
+      setMessage({ ok: false, text: errorText(err, 'Couldn’t save.') });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove() {
+    if (!confirm(`Forget the ${SMS_NAMES[provider]} account?`)) return;
+    await api(`/settings/notifications/sms/${provider}`, undefined, 'DELETE');
+    await reload();
+  }
+  return { save, remove, message, errors, busy };
+}
+
+function TwilioForm({ settings: s, reload }: { settings: Settings; reload: () => Promise<void> }) {
+  const saved = s.sms?.twilio;
+  const { save, remove, message, errors, busy } = useProviderSave('twilio', reload);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const form = new FormData(e.currentTarget);
+        const token = String(form.get('token') ?? '').trim();
+        void save({
+          accountSid: String(form.get('accountSid') ?? '').trim(),
+          ...(token && { token }),
+          from: String(form.get('from') ?? '').trim(),
+        });
+      }}
+      className="grid gap-3"
+      autoComplete="off"
+    >
+      <div className="grid gap-1.5 border-l-4 border-primary bg-surface-2 px-3 py-2.5 text-[14px]">
+        <p>
+          In the Twilio console, the Account SID and auth token are under Account Info on the home
+          page. Send from a Twilio number that can text, or a Messaging Service.
+        </p>
+        <a
+          href="https://console.twilio.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-fit"
+        >
+          Open the Twilio console ↗
+        </a>
+      </div>
+      <div className="grid items-start gap-3 sm:grid-cols-2">
+        <Field
+          label="Account SID"
+          name="accountSid"
+          defaultValue={saved?.accountSid ?? ''}
+          placeholder="AC…"
+          error={errors.accountSid}
+        />
+        <SecretField
+          label="Auth token"
+          name="token"
+          saved={Boolean(saved?.hasToken)}
+          hint={saved?.hasToken ? 'Saved and encrypted.' : undefined}
+          error={errors.token}
+          reveal={reveal('twilio')}
+        />
+        <Field
+          label="Send from"
+          name="from"
+          defaultValue={saved?.from ?? ''}
+          placeholder="+18015550000"
+          error={errors.from}
+          hint="Your Twilio number with the country code, or a Messaging Service SID (MG…)."
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          Save
+        </button>
+        {saved && (
+          <button type="button" className="linkbtn ml-auto text-danger" onClick={remove}>
+            Remove
+          </button>
+        )}
+      </div>
+      <Result message={message} />
+    </form>
+  );
+}
+
+function TelnyxForm({ settings: s, reload }: { settings: Settings; reload: () => Promise<void> }) {
+  const saved = s.sms?.telnyx;
+  const { save, remove, message, errors, busy } = useProviderSave('telnyx', reload);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const form = new FormData(e.currentTarget);
+        const apiKey = String(form.get('apiKey') ?? '').trim();
+        void save({ ...(apiKey && { apiKey }), from: String(form.get('from') ?? '').trim() });
+      }}
+      className="grid gap-3"
+      autoComplete="off"
+    >
+      <div className="grid gap-1.5 border-l-4 border-primary bg-surface-2 px-3 py-2.5 text-[14px]">
+        <ol className="grid list-decimal gap-1 pl-5">
+          <li>Buy a number that can text (Numbers → Buy Numbers).</li>
+          <li>
+            Under Messaging, make a messaging profile and put the number on it. For US numbers,
+            register it for business texting (10DLC) there too.
+          </li>
+          <li>Make an API key (Account Settings → Keys & Credentials) and paste it here.</li>
+        </ol>
+        <a
+          href="https://portal.telnyx.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-fit"
+        >
+          Open the Telnyx portal ↗
+        </a>
+      </div>
+      <div className="grid items-start gap-3 sm:grid-cols-2">
+        <SecretField
+          label="API key"
+          name="apiKey"
+          saved={Boolean(saved?.hasKey)}
+          hint={saved?.hasKey ? 'Saved and encrypted.' : undefined}
+          placeholder="KEY…"
+          error={errors.apiKey}
+          reveal={reveal('telnyx')}
+        />
+        <Field
+          label="Send from"
+          name="from"
+          defaultValue={saved?.from ?? ''}
+          placeholder="+18015550000"
+          error={errors.from}
+          hint="Your Telnyx number with the country code."
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          Save
+        </button>
+        {saved && (
+          <button type="button" className="linkbtn ml-auto text-danger" onClick={remove}>
+            Remove
+          </button>
+        )}
+      </div>
+      <Result message={message} />
+    </form>
   );
 }
