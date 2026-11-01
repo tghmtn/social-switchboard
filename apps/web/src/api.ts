@@ -110,6 +110,8 @@ export type ContactRow = {
   tags: string[];
   channels: string[];
   automationPausedAt: string | null;
+  /** Set when a person replied in the channel's app: the pause ends by itself then. */
+  automationResumeAt: string | null;
   lastSeenAt: string | null;
   createdAt: string;
 };
@@ -128,6 +130,8 @@ export type ContactDetail = {
     tags: string[];
     fields: { key: string; label: string; type: string; value: string | number | boolean | null }[];
     automationPausedAt: string | null;
+    /** Set when a person replied in the channel's app: the pause ends by itself then. */
+    automationResumeAt: string | null;
     lastSeenAt: string | null;
     createdAt: string;
   };

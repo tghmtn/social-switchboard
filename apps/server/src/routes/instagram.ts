@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { and, eq, inArray, max } from 'drizzle-orm';
+import { and, eq, inArray, max, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
@@ -374,6 +374,7 @@ export const instagramRoutes =
             eq(messages.channel, 'instagram'),
             eq(messages.direction, 'out'),
             eq(messages.status, 'sent'),
+            sql`${messages.content} ->> 'byPerson' is null`,
           ),
         );
       const login = s.loginUrl ? new URL(s.loginUrl) : undefined;

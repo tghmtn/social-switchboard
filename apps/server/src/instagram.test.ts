@@ -1,13 +1,14 @@
 import { createHmac } from 'node:crypto';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createDb, runMigrations } from './db/client';
-import { instagramAccounts, messages, webhookEvents } from './db/schema';
+import { contacts, instagramAccounts, messages, webhookEvents } from './db/schema';
 import { toInstagramMessages } from './instagram/channel';
 import { isPdfUrl, setHttp } from './instagram/graph';
+import { resumeDue, setEchoGraceMs, TAKEOVER_PAUSE } from './instagram/takeover';
 import { refreshExpiringTokens } from './instagram/tokens';
 import { signRequest } from './meta';
 
@@ -122,6 +123,8 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   let targetsEmpty = false;
   let messagesOff = false;
   let setups = 0;
+  /** Ids Instagram gives our next sends (otherwise made up). */
+  let nextMids: string[] = [];
   /** Sends wait on this, to hold a delivery mid-way. */
   let hold: Promise<void> = Promise.resolve();
 
@@ -190,7 +193,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
             },
             400,
           )
-        : json({ recipient_id: 'x', message_id: `mid.${calls.length}` });
+        : json({ recipient_id: 'x', message_id: nextMids.shift() ?? `mid.${calls.length}` });
     if (path.endsWith('/replies')) return json({ id: 'reply-1' });
     if (path === '/fan-igsid')
       return json({
@@ -237,6 +240,8 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
         sql`select count(*)::int as n from messages where status = 'queued'`,
       );
       if (r.rows[0]?.n === 0 && queued.rows[0]?.n === 0) return;
+      // Stands in for the worker's tick, which picks up deliveries a pass left for later.
+      if (i % 10 === 9) await webhook({ object: 'instagram', entry: [] });
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     throw new Error('webhook events never finished processing');
@@ -259,6 +264,8 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     targetsEmpty = false;
     messagesOff = false;
     hold = Promise.resolve();
+    nextMids = [];
+    setEchoGraceMs(30_000);
     await db.execute(sql`truncate workspaces, users, webhook_events cascade`);
     // Each test signs up a fresh owner; a new LAN address per test keeps under setup's rate limit.
     const res = await app.inject({
@@ -602,6 +609,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
       ],
     });
     calls = [];
+    nextMids = ['out-1'];
     let release = () => {};
     hold = new Promise((resolve) => {
       release = resolve;
@@ -611,10 +619,27 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     for (let i = 0; i < 100 && sends().length === 0; i++)
       await new Promise((resolve) => setTimeout(resolve, 10));
     // While the reply is still going out, Instagram's echo of it arrives and starts another pass.
-    await webhook(dm({ mid: 'out-1', text: 'Hi!', is_echo: true }, IG_ID));
+    // Its id isn't saved yet, so the echo waits rather than count as a person replying.
+    await webhook({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ID,
+          messaging: [
+            {
+              sender: { id: IG_ID },
+              recipient: { id: 'fan-igsid' },
+              message: { mid: 'out-1', text: 'Hi!', is_echo: true },
+            },
+          ],
+        },
+      ],
+    });
     await new Promise((resolve) => setTimeout(resolve, 50));
     release();
     await settled();
+    const [fan] = await db.select().from(contacts);
+    expect(fan?.automationPausedAt).toBeNull();
 
     expect(sends()).toHaveLength(1);
     const inbound = await db.select().from(messages).where(eq(messages.direction, 'in'));
@@ -684,6 +709,82 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     await webhook(dm('in-2', 'hello again'));
     await settled();
     expect(calls.some((c) => c.url.pathname.endsWith('/fan-igsid'))).toBe(false);
+  });
+
+  it('pauses automation when someone replies from the Instagram app', async () => {
+    setEchoGraceMs(0);
+    await connect();
+    const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
+      name: 'Hello',
+      starter: 'blank',
+    });
+    await call('PUT', `/api/flows/${body.flow.id}/draft`, {
+      graph: {
+        nodes: [
+          { id: 'start', type: 'start' },
+          { id: 'a', type: 'message', data: { parts: [{ type: 'text', text: 'Hi!' }] } },
+        ],
+        edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'a' }],
+      },
+    });
+    await call('POST', `/api/flows/${body.flow.id}/publish`, {});
+    await call('POST', '/api/triggers', {
+      flowId: body.flow.id,
+      config: { type: 'keyword', keywords: ['hello'], match: 'exact' },
+    });
+    const messaging = (m: object) => ({
+      object: 'instagram',
+      entry: [{ id: IG_ID, messaging: [m] }],
+    });
+    const dm = (mid: string, text: string) =>
+      messaging({ sender: { id: 'fan-igsid' }, recipient: { id: IG_ID }, message: { mid, text } });
+    const echo = (mid: string, text: string) =>
+      messaging({
+        sender: { id: IG_ID },
+        recipient: { id: 'fan-igsid' },
+        message: { mid, text, is_echo: true },
+      });
+    const fan = async () => (await db.select().from(contacts))[0];
+
+    calls = [];
+    nextMids = ['ours-1'];
+    await webhook(dm('in-1', 'hello'));
+    await settled();
+    expect(sends()).toHaveLength(1);
+    // The echo of our own reply changes nothing.
+    await webhook(echo('ours-1', 'Hi!'));
+    await settled();
+    expect((await fan())?.automationPausedAt).toBeNull();
+
+    // A reply typed in the Instagram app pauses automation for twelve hours.
+    await webhook(echo('typed-1', 'Hey, it’s Todd here'));
+    await settled();
+    const paused = await fan();
+    expect(paused?.automationPausedAt).toBeInstanceOf(Date);
+    const hours = ((paused?.automationResumeAt?.getTime() ?? 0) - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(11.9);
+    expect(hours).toBeLessThanOrEqual(12);
+    const [typed] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.externalId, 'typed-1'), eq(messages.direction, 'out')));
+    expect(typed?.content).toMatchObject({
+      byPerson: true,
+      message: { parts: [{ type: 'text', text: 'Hey, it’s Todd here' }] },
+    });
+
+    // While paused, the keyword gets no automated reply.
+    calls = [];
+    await webhook(dm('in-2', 'hello'));
+    await settled();
+    expect(sends()).toHaveLength(0);
+
+    // Twelve hours later the worker turns it back on.
+    expect(await resumeDue(db, new Date(Date.now() + TAKEOVER_PAUSE + 1000))).toBe(1);
+    expect((await fan())?.automationPausedAt).toBeNull();
+    await webhook(dm('in-3', 'hello'));
+    await settled();
+    expect(sends()).toHaveLength(1);
   });
 
   it('rejects unsigned webhooks', async () => {

@@ -196,7 +196,7 @@ export const simulatorRoutes =
         // Testing should always run, even if an earlier test ended in a hand-off.
         await tx
           .update(contacts)
-          .set({ automationPausedAt: null })
+          .set({ automationPausedAt: null, automationResumeAt: null })
           .where(eq(contacts.id, contactId));
         return contactId;
       });
@@ -235,7 +235,7 @@ export const simulatorRoutes =
       if (contactId)
         await db
           .update(contacts)
-          .set({ automationPausedAt: null })
+          .set({ automationPausedAt: null, automationResumeAt: null })
           .where(eq(contacts.id, contactId));
       return state(workspace.id, user);
     });

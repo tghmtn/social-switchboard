@@ -3,6 +3,7 @@ import { listBackups, runBackup } from './backup';
 import { loadConfig } from './config';
 import { createDb } from './db/client';
 import { processWebhookEvents } from './instagram/events';
+import { forgetSentIds, resumeDue } from './instagram/takeover';
 import { refreshExpiringTokens } from './instagram/tokens';
 import { log, logError } from './log';
 import { allChannels } from './runtime/registry';
@@ -40,6 +41,7 @@ if ((await listBackups(config.backupDir)).length === 0) await boss.send(BACKUP);
 const TICK_MS = 5_000;
 const BATCH = 50;
 let stopping = false;
+let lastForget = 0;
 let timer: NodeJS.Timeout | undefined;
 
 async function tick() {
@@ -48,6 +50,12 @@ async function tick() {
       if ((await wakeDue(runtime, BATCH)) < BATCH) break;
     }
     if (!stopping) await deliverStale(runtime);
+    // Pauses from a person replying in Instagram end by themselves.
+    if (!stopping) await resumeDue(db);
+    if (!stopping && Date.now() - lastForget > 3_600_000) {
+      await forgetSentIds(db);
+      lastForget = Date.now();
+    }
     // Webhook deliveries the API server couldn't finish (it processes them right away normally).
     if (!stopping) await processWebhookEvents({ db, runtime, appSecret: config.appSecret });
   } catch (err) {

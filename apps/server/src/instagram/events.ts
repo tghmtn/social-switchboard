@@ -4,6 +4,7 @@ import { instagramAccounts, webhookEvents } from '../db/schema';
 import { type RuntimeDeps, receive, receiveComment } from '../runtime/runtime';
 import { newContactProfile, saveAvatar, saveProfile, staleProfile } from './profiles';
 import { decryptOptional } from './settings';
+import { personReplied, sentByUs, tooSoonToTell } from './takeover';
 
 // Turns stored Instagram webhook deliveries into runtime calls. Payload shapes follow Meta's
 // Instagram webhooks; parsing rules adapted from OpenReply (MIT), lib/meta/webhook.ts.
@@ -35,6 +36,14 @@ type Entry = {
 };
 type Payload = { object?: string; entry?: Entry[] };
 
+/** The ids of the account's own messages echoed in a delivery. */
+const echoIdsOf = (payload: Payload) =>
+  (payload.entry ?? []).flatMap((e) =>
+    (e.messaging ?? []).flatMap((m) =>
+      m.message?.is_echo && m.message.mid ? [m.message.mid] : [],
+    ),
+  );
+
 const MAX_ATTEMPTS = 5;
 /** A claim older than this is treated as a crashed pass and taken over. */
 const CLAIM_TIMEOUT = 2 * 60_000;
@@ -58,6 +67,8 @@ export async function processWebhookEvents(
     .orderBy(asc(webhookEvents.id))
     .limit(limit);
   for (const ev of pending) {
+    // An echo of a message we may still be saving the id of: a later pass decides (the worker's).
+    if (await tooSoonToTell(deps.db, ev.receivedAt, echoIdsOf(ev.payload as Payload))) continue;
     const [claimed] = await deps.db
       .update(webhookEvents)
       .set({ attempts: sql`${webhookEvents.attempts} + 1`, claimedAt: new Date() })
@@ -113,9 +124,22 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
     }
 
     for (const m of entry.messaging ?? []) {
+      // The account's own messages come back as echoes: ours, or a person replying in Instagram.
+      if (m.message?.is_echo) {
+        const to = m.recipient?.id;
+        if (!to || (m.message.mid && (await sentByUs(deps.db, m.message.mid)))) continue;
+        await personReplied(deps.db, {
+          workspaceId: account.workspaceId,
+          accountRef: entry.id,
+          igsid: to,
+          mid: m.message.mid,
+          text: m.message.text,
+        });
+        continue;
+      }
       const sender = m.sender?.id;
-      if (!sender || sender === entry.id) continue; // our own messages echoing back
-      if (m.message?.is_echo || m.message?.is_deleted) continue;
+      if (!sender || sender === entry.id) continue;
+      if (m.message?.is_deleted) continue;
       const text = m.message?.text ?? m.postback?.title;
       const payloadValue = m.message?.quick_reply?.payload ?? m.postback?.payload;
       const ref = m.referral?.ref;

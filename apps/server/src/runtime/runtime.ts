@@ -674,7 +674,7 @@ async function persist(
       case 'handoff':
         await tx
           .update(contacts)
-          .set({ automationPausedAt: ctx.now })
+          .set({ automationPausedAt: ctx.now, automationResumeAt: null })
           .where(eq(contacts.id, contactId));
         await tx
           .update(runs)

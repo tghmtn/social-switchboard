@@ -5,6 +5,10 @@ import { Avatar, Field, FormError, Toggle, timeAgo } from '../ui';
 import { contactName } from './Contacts';
 import { Page } from './Shell';
 
+/** "Sat 9:41 AM": when a pause ends. */
+const untilText = (at: string) =>
+  new Date(at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+
 /** What the channel told us about them: "Follows you · 1,204 followers". */
 function profileFacts(i: Detail['identities'][number]) {
   const facts = [
@@ -47,8 +51,12 @@ function eventText(e: Detail['events'][number], flowNames: Map<string, string>):
       return `Team notified: ${d.message}`;
     case 'handoff':
       return `Handed off to a person${d.note ? ` (${d.note})` : ''}`;
+    case 'person_replied':
+      return 'You replied from Instagram, so automation paused';
     case 'automation_resumed':
-      return 'Automation resumed';
+      return d.automatic
+        ? 'Automation back on (12 hours after your last reply)'
+        : 'Automation resumed';
     case 'contact_edited':
       return 'Details edited';
     default:
@@ -140,11 +148,20 @@ export function ContactDetail() {
 
       {c.automationPausedAt && (
         <div className="card flex flex-wrap items-center gap-3 border-accent">
-          <span className="chip chip-orange">Needs a person</span>
-          <p className="flex-1 text-[15px]">
-            A flow handed this conversation off {timeAgo(c.automationPausedAt)}. Automation is
-            paused until you resume it.
-          </p>
+          <span className="chip chip-orange">
+            {c.automationResumeAt ? 'You replied' : 'Needs a person'}
+          </span>
+          {c.automationResumeAt ? (
+            <p className="flex-1 text-[15px]">
+              You replied from Instagram {timeAgo(c.automationPausedAt)}, so flows won’t answer them
+              until {untilText(c.automationResumeAt)}. Each reply you send restarts the 12 hours.
+            </p>
+          ) : (
+            <p className="flex-1 text-[15px]">
+              A flow handed this conversation off {timeAgo(c.automationPausedAt)}. Automation is
+              paused until you resume it.
+            </p>
+          )}
           <button
             type="button"
             className="btn btn-sm"

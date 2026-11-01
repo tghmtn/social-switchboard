@@ -144,7 +144,9 @@ export function Contacts() {
                       <Avatar name={contactName(c)} size={32} src={avatarUrl(c)} />
                       <span className="truncate">{contactName(c)}</span>
                       {c.automationPausedAt && (
-                        <span className="chip chip-orange">Needs a person</span>
+                        <span className="chip chip-orange">
+                          {c.automationResumeAt ? 'You replied' : 'Needs a person'}
+                        </span>
                       )}
                     </Link>
                   </td>

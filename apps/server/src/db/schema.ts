@@ -94,8 +94,13 @@ export const contacts = pgTable(
     phone: text('phone'),
     /** Values for workspace-defined fields, keyed by field key. */
     customFields: jsonb('custom_fields').$type<Record<string, FieldValue>>().notNull().default({}),
-    /** Set by a hand-off step; automation stays off for this contact until a person resumes it. */
+    /**
+     * Automation is off for this contact: a hand-off step (until a person resumes it), or a
+     * person replying from the channel's own app (until automationResumeAt).
+     */
     automationPausedAt: timestamp('automation_paused_at', { withTimezone: true }),
+    /** When a person-replied pause ends by itself. Null with a pause: it lasts until resumed. */
+    automationResumeAt: timestamp('automation_resume_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -373,6 +378,8 @@ export type OutboundContent = {
   privateReplyTo?: string;
   /** A public reply posted under this comment (not a DM). */
   publicReplyTo?: string;
+  /** Typed by a person in the channel's own app (seen through its echo), not sent by a flow. */
+  byPerson?: true;
 };
 
 export const messageDirection = pgEnum('message_direction', ['in', 'out']);
@@ -481,6 +488,20 @@ export const instagramAccounts = pgTable(
 );
 
 /** Raw webhook deliveries, stored before processing so none are lost if processing fails. */
+/**
+ * Ids of the messages we sent. Instagram echoes every message the account sends without saying
+ * which app sent it, so an echo whose id isn't here was typed by a person. Kept a couple of days.
+ */
+export const sentMessageIds = pgTable(
+  'sent_message_ids',
+  {
+    externalId: text('external_id').primaryKey(),
+    workspaceId: workspaceId(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('sent_message_ids_created_idx').on(t.createdAt)],
+);
+
 export const webhookEvents = pgTable(
   'webhook_events',
   {

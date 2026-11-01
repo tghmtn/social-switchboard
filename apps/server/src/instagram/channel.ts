@@ -5,6 +5,7 @@ import { instagramAccounts, messages, type OutboundContent } from '../db/schema'
 import type { ChannelAdapter, SendResult } from '../runtime/channels';
 import { type Host, isPdfUrl, MESSAGES_OFF, MetaError, replyToComment, sendMessage } from './graph';
 import { accountFor, decryptOptional } from './settings';
+import { rememberSent } from './takeover';
 
 const DAY = 24 * 3_600_000;
 const TEXT_LIMIT = 1000;
@@ -172,6 +173,8 @@ export function instagramChannel(db: Db, appSecret: string): ChannelAdapter {
           pdfs,
         )) {
           const res = await sendMessage(account.igUserId, token, recipient, message, host);
+          // Saved before anything else, so its echo is recognized as ours, not a person's.
+          if (res.message_id) await rememberSent(db, target.workspaceId, res.message_id);
           lastId = res.message_id ?? lastId;
         }
         if (account.statusDetail === MESSAGES_OFF)
