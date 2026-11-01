@@ -7,8 +7,8 @@ import { Contacts } from './pages/Contacts';
 import { FlowEditor } from './pages/FlowEditor';
 import { Flows } from './pages/Flows';
 import { Home } from './pages/Home';
+import { Inbox } from './pages/Inbox';
 import { Login } from './pages/Login';
-import { Inbox } from './pages/Placeholders';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { Shell } from './pages/Shell';
@@ -75,6 +75,7 @@ export function App() {
               <Route path="/channels" element={<Channels />} />
               <Route path="/channels/instagram" element={<InstagramChannel />} />
               <Route path="/inbox" element={<Inbox />} />
+              <Route path="/inbox/:id" element={<Inbox />} />
               <Route path="/settings" element={<Settings me={state.me} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

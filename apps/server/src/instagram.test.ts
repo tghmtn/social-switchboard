@@ -787,6 +787,79 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(sends()).toHaveLength(1);
   });
 
+  it('runs a conversation from the inbox', async () => {
+    await connect();
+    const dm = (mid: string, text: string) => ({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ID,
+          messaging: [
+            { sender: { id: 'fan-igsid' }, recipient: { id: IG_ID }, message: { mid, text } },
+          ],
+        },
+      ],
+    });
+    type Listed = {
+      conversations: {
+        contactId: string;
+        unread: number;
+        status: string;
+        last: { text: string };
+      }[];
+      counts: Record<string, number>;
+    };
+    await webhook(dm('in-1', 'Hi there'));
+    await settled();
+
+    const inbox = await call<Listed>('GET', '/api/inbox');
+    expect(inbox.body.conversations).toHaveLength(1);
+    const conv = inbox.body.conversations[0];
+    expect(conv).toMatchObject({ unread: 1, status: 'open', last: { text: 'Hi there' } });
+    const id = conv?.contactId ?? '';
+    expect((await call('GET', '/api/inbox/summary')).body).toEqual({ unread: 1 });
+    await call('POST', `/api/inbox/${id}/read`, {});
+    expect((await call('GET', '/api/inbox/summary')).body).toEqual({ unread: 0 });
+
+    // A reply typed here goes out through Instagram and pauses automation like one from the app.
+    calls = [];
+    const sent = await call('POST', `/api/inbox/${id}/reply`, { text: 'Hey! Todd here.' });
+    expect(sent.body).toMatchObject({ message: { status: 'sent' } });
+    expect(sends()[0]?.body).toMatchObject({
+      recipient: { id: 'fan-igsid' },
+      message: { text: 'Hey! Todd here.' },
+    });
+    const [paused] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(paused?.automationResumeAt).toBeInstanceOf(Date);
+    type Detail = {
+      messages: { direction: string; by: string }[];
+      notes: { text: string }[];
+      team: { id: string }[];
+    };
+    const detail = await call<Detail>('GET', `/api/inbox/${id}`);
+    expect(detail.body.messages.map((m) => [m.direction, m.by])).toEqual([
+      ['in', 'them'],
+      ['out', 'Todd'],
+    ]);
+
+    // Closed, then reopened by their next message.
+    await call('POST', `/api/inbox/${id}/status`, { status: 'closed' });
+    expect((await call<Listed>('GET', '/api/inbox?view=closed')).body.counts.closed).toBe(1);
+    await webhook(dm('in-2', 'One more thing'));
+    await settled();
+    const [reopened] = await db.select().from(contacts).where(eq(contacts.id, id));
+    expect(reopened?.conversationStatus).toBe('open');
+
+    // Notes stay internal; assigning puts it under Mine.
+    await call('POST', `/api/inbox/${id}/note`, { text: 'Wants the PDF in Spanish' });
+    const me = detail.body.team[0]?.id;
+    await call('POST', `/api/inbox/${id}/assign`, { userId: me });
+    const after = await call<Detail>('GET', `/api/inbox/${id}`);
+    expect(after.body.notes.map((n) => n.text)).toEqual(['Wants the PDF in Spanish']);
+    expect((await call<Listed>('GET', '/api/inbox?view=mine')).body.conversations).toHaveLength(1);
+    expect(sends()).toHaveLength(1); // the note went nowhere
+  });
+
   it('rejects unsigned webhooks', async () => {
     await connect();
     const res = await webhook(

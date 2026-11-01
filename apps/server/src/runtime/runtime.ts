@@ -118,7 +118,7 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
     const now = deps.now?.() ?? new Date();
     const [contact] = await tx
       .update(contacts)
-      .set({ lastSeenAt: now })
+      .set({ lastSeenAt: now, conversationStatus: 'open' }) // a new message reopens it in the inbox
       .where(eq(contacts.id, contactId))
       .returning({ pausedAt: contacts.automationPausedAt });
     await tx.insert(messages).values({
@@ -161,7 +161,7 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
     const now = deps.now?.() ?? new Date();
     const [contact] = await tx
       .update(contacts)
-      .set({ lastSeenAt: now })
+      .set({ lastSeenAt: now, conversationStatus: 'open' }) // a new message reopens it in the inbox
       .where(eq(contacts.id, contactId))
       .returning({ pausedAt: contacts.automationPausedAt });
     await tx.insert(messages).values({

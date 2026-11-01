@@ -381,6 +381,25 @@ export const contactRoutes =
       return { ok: true };
     });
 
+    /** Turns automation off for this contact until someone resumes it, like a hand-off. */
+    app.post('/contacts/:id/pause-automation', async (req) => {
+      const { user, workspace } = who(req);
+      const { id } = z.object({ id: z.uuid() }).parse(req.params);
+      await withContact(workspace.id, id, async (tx) => {
+        const now = new Date();
+        await tx
+          .update(contacts)
+          .set({ automationPausedAt: now, automationResumeAt: null })
+          .where(eq(contacts.id, id));
+        await tx
+          .update(runs)
+          .set({ status: 'cancelled', endedAt: now, updatedAt: now, wakeAt: null })
+          .where(and(eq(runs.contactId, id), eq(runs.status, 'waiting')));
+        await recordEvent(tx, workspace.id, id, 'automation_paused', { by: user.id });
+      });
+      return { ok: true };
+    });
+
     /** Turns automation back on after a hand-off, or before a person-replied pause runs out. */
     app.post('/contacts/:id/resume-automation', async (req) => {
       const { user, workspace } = who(req);

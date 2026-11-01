@@ -83,6 +83,8 @@ export const sessions = pgTable(
 
 // ---------------------------------------------------------------- contacts
 
+export const conversationStatus = pgEnum('conversation_status', ['open', 'closed']);
+
 export const contacts = pgTable(
   'contacts',
   {
@@ -101,6 +103,10 @@ export const contacts = pgTable(
     automationPausedAt: timestamp('automation_paused_at', { withTimezone: true }),
     /** When a person-replied pause ends by itself. Null with a pause: it lasts until resumed. */
     automationResumeAt: timestamp('automation_resume_at', { withTimezone: true }),
+    /** Inbox: closed once handled; a new message from them opens it again. */
+    conversationStatus: conversationStatus('conversation_status').notNull().default('open'),
+    /** Inbox: the teammate looking after this conversation. */
+    assignedUserId: uuid('assigned_user_id').references(() => users.id, { onDelete: 'set null' }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -378,8 +384,10 @@ export type OutboundContent = {
   privateReplyTo?: string;
   /** A public reply posted under this comment (not a DM). */
   publicReplyTo?: string;
-  /** Typed by a person in the channel's own app (seen through its echo), not sent by a flow. */
+  /** Typed by a person (in the channel's own app, or the inbox), not sent by a flow. */
   byPerson?: true;
+  /** The teammate who sent it from the inbox. */
+  sentBy?: string;
 };
 
 export const messageDirection = pgEnum('message_direction', ['in', 'out']);
@@ -492,6 +500,22 @@ export const instagramAccounts = pgTable(
  * Ids of the messages we sent. Instagram echoes every message the account sends without saying
  * which app sent it, so an echo whose id isn't here was typed by a person. Kept a couple of days.
  */
+/** Inbox: how far each teammate has read each conversation (by message seq). */
+export const conversationReads = pgTable(
+  'conversation_reads',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'cascade' }),
+    lastReadSeq: bigint('last_read_seq', { mode: 'number' }).notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.contactId] })],
+);
+
 export const sentMessageIds = pgTable(
   'sent_message_ids',
   {

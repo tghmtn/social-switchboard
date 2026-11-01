@@ -7,6 +7,7 @@ import {
   contacts,
   contactTags,
   fieldDefinitions,
+  runs,
   tags,
 } from '../db/schema';
 
@@ -20,6 +21,34 @@ export async function lockContact(tx: Tx, contactId: string) {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`contact:${contactId}`}, 0))`,
   );
+}
+
+/** How long a person's reply keeps automation off for that contact; each new reply restarts it. */
+export const TAKEOVER_PAUSE = 12 * 3_600_000;
+
+/**
+ * A person replied (in the channel's own app, or from the inbox): automation pauses for
+ * TAKEOVER_PAUSE, and a flow waiting on this contact is cancelled so it can't catch their next
+ * message. A hand-off pause (no end) stays as it is. Returns when the pause ends, or null for a
+ * hand-off. Call holding the contact's lock.
+ */
+export async function pauseForPerson(tx: Tx, contactId: string, now: Date) {
+  const [c] = await tx
+    .select({ pausedAt: contacts.automationPausedAt, resumeAt: contacts.automationResumeAt })
+    .from(contacts)
+    .where(eq(contacts.id, contactId));
+  const handedOff = Boolean(c?.pausedAt && !c.resumeAt);
+  const until = new Date(now.getTime() + TAKEOVER_PAUSE);
+  if (!handedOff)
+    await tx
+      .update(contacts)
+      .set({ automationPausedAt: c?.pausedAt ?? now, automationResumeAt: until, updatedAt: now })
+      .where(eq(contacts.id, contactId));
+  await tx
+    .update(runs)
+    .set({ status: 'cancelled', endedAt: now, updatedAt: now, wakeAt: null })
+    .where(and(eq(runs.contactId, contactId), eq(runs.status, 'waiting')));
+  return handedOff ? null : until;
 }
 
 export type Profile = {

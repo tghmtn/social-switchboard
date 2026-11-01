@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth';
 import { contactRoutes } from './routes/contacts';
 import { flowRoutes } from './routes/flows';
 import { healthRoutes } from './routes/health';
+import { inboxRoutes } from './routes/inbox';
 import { instagramPublicRoutes, instagramRoutes } from './routes/instagram';
 import { legalRoutes } from './routes/legal';
 import { libraryRoutes } from './routes/library';
@@ -117,6 +118,7 @@ export async function buildApp(deps: AppDeps, logger: FastifyServerOptions['logg
     simulatorRoutes,
     overviewRoutes,
     instagramRoutes,
+    inboxRoutes,
   ]) {
     await app.register(routes(routeDeps), { prefix: '/api' });
   }

@@ -1,14 +1,19 @@
 import { and, eq, inArray, isNotNull, lt, lte } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { contacts, messages, runs, sentMessageIds } from '../db/schema';
-import { findOrCreateContact, lockContact, recordEvent } from '../runtime/contacts';
+import { contacts, messages, sentMessageIds } from '../db/schema';
+import {
+  findOrCreateContact,
+  lockContact,
+  pauseForPerson,
+  recordEvent,
+  TAKEOVER_PAUSE,
+} from '../runtime/contacts';
+
+export { TAKEOVER_PAUSE };
 
 // Human takeover. Instagram echoes every message the account sends, ours and ones typed in the
 // Instagram app alike, without saying which app sent it. We remember the id of each message we
 // send; an echo we don't recognize is a person replying, and pauses automation for that contact.
-
-/** How long a person's reply keeps automation off for that contact; each new reply restarts it. */
-export const TAKEOVER_PAUSE = 12 * 3_600_000;
 
 /**
  * An echo can arrive before we've saved the id of the message it echoes, so an unknown echo
@@ -42,10 +47,7 @@ export async function tooSoonToTell(db: Db, receivedAt: Date, echoIds: string[])
   return known.length < new Set(echoIds).size;
 }
 
-/**
- * A person replied from the Instagram app: keep their message, cancel any flow waiting on this
- * contact, and pause automation for TAKEOVER_PAUSE. A hand-off pause stays as it is (no end).
- */
+/** A person replied from the Instagram app: keep their message and pause automation. */
 export async function personReplied(
   db: Db,
   input: { workspaceId: string; accountRef: string; igsid: string; mid?: string; text?: string },
@@ -62,26 +64,7 @@ export async function personReplied(
     );
     await lockContact(tx, contactId);
     const now = new Date();
-    const [contact] = await tx
-      .select({ pausedAt: contacts.automationPausedAt, resumeAt: contacts.automationResumeAt })
-      .from(contacts)
-      .where(eq(contacts.id, contactId));
-    const handedOff = Boolean(contact?.pausedAt && !contact.resumeAt);
-    const until = new Date(now.getTime() + TAKEOVER_PAUSE);
-    if (!handedOff)
-      await tx
-        .update(contacts)
-        .set({
-          automationPausedAt: contact?.pausedAt ?? now,
-          automationResumeAt: until,
-          updatedAt: now,
-        })
-        .where(eq(contacts.id, contactId));
-    // A question the flow was waiting on would otherwise catch their next message.
-    await tx
-      .update(runs)
-      .set({ status: 'cancelled', endedAt: now, updatedAt: now, wakeAt: null })
-      .where(and(eq(runs.contactId, contactId), eq(runs.status, 'waiting')));
+    const until = await pauseForPerson(tx, contactId, now);
     await tx.insert(messages).values({
       workspaceId: input.workspaceId,
       contactId,
@@ -102,7 +85,7 @@ export async function personReplied(
       },
     });
     await recordEvent(tx, input.workspaceId, contactId, 'person_replied', {
-      pausedUntil: handedOff ? null : until.toISOString(),
+      pausedUntil: until?.toISOString() ?? null,
     });
   });
 }

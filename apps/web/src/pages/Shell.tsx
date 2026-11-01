@@ -1,7 +1,7 @@
 import { Moon, Sun } from '@phosphor-icons/react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router';
-import { api, type Me } from '../api';
+import { api, type Me, useApi } from '../api';
 import { Icon } from '../components/Icon';
 import { SquareIcon, type SquareIconName } from '../components/SquareIcons';
 import { getTheme, setTheme, type ThemeChoice } from '../theme';
@@ -13,7 +13,7 @@ const NAV: { to: string; label: string; icon: SquareIconName; end?: boolean; pha
   { to: '/contacts', label: 'Contacts', icon: 'kit' },
   { to: '/simulator', label: 'Simulator', icon: 'phone' },
   { to: '/channels', label: 'Channels', icon: 'chat' },
-  { to: '/inbox', label: 'Inbox', icon: 'inbox', phase: 3 },
+  { to: '/inbox', label: 'Inbox', icon: 'inbox' },
   { to: '/settings', label: 'Settings', icon: 'sliders' },
 ];
 
@@ -21,6 +21,14 @@ const NAV: { to: string; label: string; icon: SquareIconName; end?: boolean; pha
 export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const workspace = me.workspaces[0];
   const [theme, setChoice] = useState(getTheme);
+  // Open conversations with something new, for the Inbox link.
+  const inbox = useApi<{ unread: number }>('/inbox/summary');
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') void inbox.reload();
+    }, 20_000);
+    return () => clearInterval(t);
+  }, [inbox.reload]);
   const themeToggle = <ThemeToggle choice={theme} onChange={setChoice} />;
 
   async function signOut() {
@@ -50,6 +58,11 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               {n.label}
               {n.phase && (
                 <span className="chip ml-auto px-1.5 py-0 text-[10px] text-muted">Soon</span>
+              )}
+              {n.to === '/inbox' && (inbox.data?.unread ?? 0) > 0 && (
+                <span className="chip chip-lime ml-auto px-1.5 py-0 text-[11px] tabular-nums">
+                  {inbox.data?.unread}
+                </span>
               )}
             </NavLink>
           ))}

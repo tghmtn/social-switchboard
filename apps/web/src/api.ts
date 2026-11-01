@@ -208,6 +208,79 @@ export type InstagramSettings = {
   lastSentAt: string | null;
   accounts: InstagramAccount[];
 };
+/** Inbox: one conversation in the list. */
+export type InboxConversation = {
+  contactId: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  username: string | null;
+  channel: string | null;
+  avatarVersion: number | null;
+  status: 'open' | 'closed';
+  assignedUserId: string | null;
+  automationPausedAt: string | null;
+  automationResumeAt: string | null;
+  last: { direction: 'in' | 'out'; status: string; text: string; byPerson: boolean; at: string };
+  unread: number;
+};
+export type InboxView = 'open' | 'unread' | 'mine' | 'attention' | 'closed' | 'all';
+export type InboxList = {
+  conversations: InboxConversation[];
+  counts: Record<InboxView, number>;
+};
+type MessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; url: string }
+  | { type: 'file'; url: string; name: string };
+export type InboxMessageContent =
+  | {
+      kind: 'in';
+      text?: string;
+      payload?: string;
+      ref?: string;
+      comment?: { id: string; mediaId?: string };
+    }
+  | {
+      kind: 'out';
+      message: {
+        parts: MessagePart[];
+        buttons: { id: string; kind: string; label: string; url?: string }[];
+        quickReplies: { id: string; label: string }[];
+      };
+      privateReplyTo?: string;
+      publicReplyTo?: string;
+      byPerson?: boolean;
+    };
+export type InboxDetail = {
+  contact: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    avatarVersion: number | null;
+    status: 'open' | 'closed';
+    assignedUserId: string | null;
+    automationPausedAt: string | null;
+    automationResumeAt: string | null;
+  };
+  identities: { channel: string; username: string | null; followsUs: boolean | null }[];
+  /** Instagram replies are allowed until then (24 hours after their last DM). */
+  replyWindowEndsAt: string | null;
+  messages: {
+    id: string;
+    seq: number;
+    direction: 'in' | 'out';
+    status: string;
+    error: string | null;
+    at: string;
+    content: InboxMessageContent;
+    /** "them", "Flow", or the teammate's name. */
+    by: string;
+  }[];
+  notes: { id: number; text: string; by: string; at: string }[];
+  team: { id: string; name: string }[];
+};
 export type Guide = { markdown: string; source: 'latest' | 'bundled' };
 export type FieldDef = { id: string; key: string; label: string; type: string; options: string[] };
 export type Tag = { id: string; name: string; contacts: number };

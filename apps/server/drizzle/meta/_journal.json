@@ -78,6 +78,13 @@
       "when": 1793504189373,
       "tag": "0010_human_takeover",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793505136337,
+      "tag": "0011_inbox",
+      "breakpoints": true
     }
   ]
 }
