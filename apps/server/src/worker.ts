@@ -1,4 +1,5 @@
 import { PgBoss } from 'pg-boss';
+import { aiStepper } from './ai/flow-step';
 import { listBackups, runBackup } from './backup';
 import { loadConfig } from './config';
 import { createDb } from './db/client';
@@ -17,6 +18,7 @@ const runtime: RuntimeDeps = {
   channels: allChannels(db, config.appSecret),
   log,
   notify: notifier({ db, appSecret: config.appSecret, publicUrl: config.publicUrl, log }),
+  aiTurn: aiStepper({ db, appSecret: config.appSecret, log }),
 };
 
 const boss = new PgBoss(config.databaseUrl);

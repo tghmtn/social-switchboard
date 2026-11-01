@@ -46,7 +46,22 @@ export type RuntimeDeps = {
   log?: (msg: string, fields?: Record<string, unknown>) => void;
   /** Push notifications (best effort; see notify.ts). */
   notify?: (n: Notice) => void;
+  /** An AI step's next turn (see ai/flow-step.ts). Without it, AI steps hand off to a person. */
+  aiTurn?: (t: AiTurn) => Promise<AiTurnResult>;
 };
+
+export type AiTurn = {
+  workspaceId: string;
+  contactId: string;
+  runId: string;
+  nodeId: string;
+  token: string;
+  /** Replies the step has sent so far. */
+  turns: number;
+  /** A comment started this and its one private reply is unused: the AI's reply goes there. */
+  commentId?: string;
+};
+export type AiTurnResult = Omit<Extract<EngineEvent, { type: 'ai_result' }>, 'type' | 'token'>;
 
 const notifyAll = (deps: RuntimeDeps, notices: Notice[]) => {
   for (const n of notices) deps.notify?.(n);
@@ -92,6 +107,8 @@ type Ctx = {
   queued: string[];
   /** Push notifications to send once the transaction commits. */
   notices: Notice[];
+  /** AI step turns to take once the transaction commits. */
+  aiTurns: AiTurn[];
   /** How many "go to flow" hops this event has taken, to stop flows that call each other forever. */
   hops: number;
   /** Set when a comment started this: the first message is the comment's one private reply. */
@@ -99,7 +116,8 @@ type Ctx = {
 };
 
 const MAX_FLOW_HOPS = 5;
-const CONVERSATION_WAITS = ['input', 'choice'];
+// Waits a fresh message can answer: a question, a choice, or an AI step's conversation.
+const CONVERSATION_WAITS = ['input', 'choice', 'ai'];
 
 // Payloads ride along on quick replies and flow buttons and come back when they're tapped.
 const PAYLOAD_VERSION = 'ssw1';
@@ -116,6 +134,7 @@ export function decodePayload(payload: string) {
 export async function receive(deps: RuntimeDeps, input: Inbound) {
   const queued: string[] = [];
   const notices: Notice[] = [];
+  const aiTurns: AiTurn[] = [];
   const contactId = await deps.db.transaction(async (tx) => {
     const { contactId, isNew } = await findOrCreateContact(
       tx,
@@ -160,12 +179,14 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
       now,
       queued,
       notices,
+      aiTurns,
     );
     await route(ctx, input, isNew);
     return contactId;
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
+  await runAiTurns(deps, aiTurns);
   return { contactId };
 }
 
@@ -176,6 +197,7 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
 export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
   const queued: string[] = [];
   const notices: Notice[] = [];
+  const aiTurns: AiTurn[] = [];
   const result = await deps.db.transaction(async (tx) => {
     const { contactId } = await findOrCreateContact(
       tx,
@@ -246,6 +268,7 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
       now,
       queued,
       notices,
+      aiTurns,
     );
     ctx.commentReply = { commentId: input.commentId, used: false };
     await cancelConversationRuns(ctx);
@@ -280,6 +303,7 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
+  await runAiTurns(deps, aiTurns);
   return result;
 }
 
@@ -361,6 +385,7 @@ export async function startFlow(
 ) {
   const queued: string[] = [];
   const notices: Notice[] = [];
+  const aiTurns: AiTurn[] = [];
   const runId = await deps.db.transaction(async (tx) => {
     await lockContact(tx, args.contactId);
     const ctx = await context(
@@ -372,6 +397,7 @@ export async function startFlow(
       deps.now?.() ?? new Date(),
       queued,
       notices,
+      aiTurns,
     );
     const version = await loadVersion(tx, args.workspaceId, args.versionId);
     if (!version) throw new Error(`flow version ${args.versionId} not found`);
@@ -380,13 +406,65 @@ export async function startFlow(
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
+  await runAiTurns(deps, aiTurns);
   return runId;
+}
+
+/**
+ * Takes AI step turns: asks the AI (outside any transaction, it can take seconds), then feeds the
+ * answer to the run like a timer firing. An answer can lead to further turns; at most 10 here.
+ */
+async function runAiTurns(deps: RuntimeDeps, turns: AiTurn[]) {
+  for (let i = 0; i < turns.length && i < 10; i++) {
+    const t = turns[i] as AiTurn;
+    let result: AiTurnResult = { outcome: 'handoff' };
+    if (deps.aiTurn) {
+      try {
+        result = await deps.aiTurn(t);
+      } catch (err) {
+        deps.log?.('AI step failed: handing off', {
+          runId: t.runId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    turns.push(...(await answerAi(deps, t, result)));
+  }
+}
+
+async function answerAi(deps: RuntimeDeps, t: AiTurn, result: AiTurnResult) {
+  const queued: string[] = [];
+  const notices: Notice[] = [];
+  const aiTurns: AiTurn[] = [];
+  await deps.db.transaction(async (tx) => {
+    await lockContact(tx, t.contactId);
+    const [run] = await tx.select().from(runs).where(eq(runs.id, t.runId));
+    // The run moved on meanwhile (cancelled, timed out, a person took over): drop the answer.
+    if (run?.status !== 'waiting' || run.wakeToken !== t.token) return;
+    const ctx = await context(
+      deps,
+      tx,
+      run.workspaceId,
+      run.contactId,
+      run.channel,
+      deps.now?.() ?? new Date(),
+      queued,
+      notices,
+      aiTurns,
+    );
+    if (t.commentId) ctx.commentReply = { commentId: t.commentId, used: false };
+    await step(ctx, run, { type: 'ai_result', token: t.token, ...result });
+  });
+  await deliver(deps, queued);
+  notifyAll(deps, notices);
+  return aiTurns;
 }
 
 /** Fires a due delay or reply timeout. Stale tokens (the run already moved on) are ignored. */
 export async function wake(deps: RuntimeDeps, runId: string, token: string) {
   const queued: string[] = [];
   const notices: Notice[] = [];
+  const aiTurns: AiTurn[] = [];
   await deps.db.transaction(async (tx) => {
     const [peek] = await tx
       .select({ contactId: runs.contactId })
@@ -417,11 +495,13 @@ export async function wake(deps: RuntimeDeps, runId: string, token: string) {
       now,
       queued,
       notices,
+      aiTurns,
     );
     await step(ctx, run, { type: 'wake', token });
   });
   await deliver(deps, queued);
   notifyAll(deps, notices);
+  await runAiTurns(deps, aiTurns);
 }
 
 /** Wakes every run whose delay or timeout is due. Returns how many it looked at. */
@@ -522,6 +602,7 @@ async function context(
   now: Date,
   queued: string[],
   notices: Notice[],
+  aiTurns: AiTurn[],
 ): Promise<Ctx> {
   const [ws] = await tx
     .select({ timeZone: workspaces.timeZone })
@@ -537,6 +618,7 @@ async function context(
     now,
     queued,
     notices,
+    aiTurns,
     hops: 0,
   };
 }
@@ -770,6 +852,24 @@ async function persist(
       case 'start_flow':
         nextFlows.push(e.flowId);
         break;
+      case 'ai_turn': {
+        const wait = result.state.wait;
+        if (wait?.kind !== 'ai') break;
+        // Keep the comment's private reply for the AI's answer, which comes after this commits.
+        const reply = ctx.commentReply;
+        const commentId = reply && !reply.used ? reply.commentId : undefined;
+        if (reply) reply.used = true;
+        ctx.aiTurns.push({
+          workspaceId,
+          contactId,
+          runId: run.id,
+          nodeId: e.nodeId,
+          token: wait.token,
+          turns: wait.turns,
+          commentId,
+        });
+        break;
+      }
     }
   }
   if (fieldsChanged) await saveFields(tx, workspaceId, contactId, result.contact.fields);

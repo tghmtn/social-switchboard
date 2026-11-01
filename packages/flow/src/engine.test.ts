@@ -428,6 +428,111 @@ describe('ending steps and safety', () => {
   });
 });
 
+describe('AI steps', () => {
+  const g = graph({
+    nodes: [
+      { id: 'start', type: 'start' },
+      {
+        id: 'chat',
+        type: 'ai',
+        data: {
+          goal: 'Find out which class they want and get their email',
+          collect: [{ key: 'class_wanted' }, { key: 'email' }],
+          maxTurns: 2,
+        },
+      },
+      { id: 'thanks', type: 'message', data: text('Thanks, {{first_name}}!') },
+      { id: 'sorry', type: 'message', data: text('Let me get a person.') },
+    ],
+    edges: [e('start', 'next', 'chat'), e('chat', 'done', 'thanks'), e('chat', 'gave_up', 'sorry')],
+  });
+  const turn = (state: RunState | null, event: EngineEvent, c = ctx()) =>
+    advance(g, state, event, c);
+  const tokenOf = (s: RunState) => (s.wait?.kind === 'ai' ? s.wait.token : '');
+
+  it('asks the host for each reply, sends it as written, and saves only the fields it collects', () => {
+    const start = turn(null, { type: 'start' });
+    expect(start.effects).toEqual([{ type: 'ai_turn', nodeId: 'chat' }]);
+    expect(start.state.wait).toMatchObject({ kind: 'ai', turns: 0, thinking: true });
+
+    const first = turn(start.state, {
+      type: 'ai_result',
+      token: tokenOf(start.state),
+      reply: 'Which class, {{first_name}}?',
+      fields: { class_wanted: 'Pottery', secret: 'nope' },
+      outcome: 'continue',
+    });
+    expect(sends(first.effects)).toEqual(['Which class, {{first_name}}?']);
+    expect(first.contact.fields).toMatchObject({ class_wanted: 'Pottery' });
+    expect(first.contact.fields).not.toHaveProperty('secret');
+    expect(first.state.wait).toMatchObject({ kind: 'ai', turns: 1, thinking: false });
+
+    const answered = turn(
+      first.state,
+      { type: 'message', text: 'ada@example.com' },
+      ctx({ contact: first.contact }),
+    );
+    expect(answered.effects).toEqual([{ type: 'ai_turn', nodeId: 'chat' }]);
+    const done = turn(
+      answered.state,
+      {
+        type: 'ai_result',
+        token: tokenOf(answered.state),
+        fields: { email: 'ada@example.com' },
+        outcome: 'done',
+      },
+      ctx({ contact: answered.contact }),
+    );
+    expect(sends(done.effects)).toEqual(['Thanks, Ada!']);
+    expect(done.state.status).toBe('completed');
+  });
+
+  it('ignores a stale result, and takes another turn for a message sent while it was thinking', () => {
+    const start = turn(null, { type: 'start' });
+    expect(turn(start.state, { type: 'ai_result', token: 'old', outcome: 'done' }).handled).toBe(
+      false,
+    );
+    const meanwhile = turn(start.state, { type: 'message', text: 'also, is it on Saturday?' });
+    expect(meanwhile.handled).toBe(true);
+    expect(meanwhile.effects).toEqual([]);
+    const result = turn(meanwhile.state, {
+      type: 'ai_result',
+      token: tokenOf(meanwhile.state),
+      reply: 'Hi!',
+      outcome: 'continue',
+    });
+    expect(result.effects.map((x) => x.type)).toEqual(['send', 'ai_turn']);
+    expect(result.state.wait).toMatchObject({ thinking: true, turns: 1 });
+  });
+
+  it('gives up after maxTurns replies, and hands off when asked with nothing connected', () => {
+    let state = turn(null, { type: 'start' }).state;
+    for (let i = 0; i < 2; i++) {
+      state = turn(state, {
+        type: 'ai_result',
+        token: tokenOf(state),
+        reply: `Reply ${i}`,
+        outcome: 'continue',
+      }).state;
+      if (i < 1) state = turn(state, { type: 'message', text: 'hm' }).state;
+    }
+    const gaveUp = turn(state, { type: 'message', text: 'still unsure' });
+    expect(sends(gaveUp.effects)).toEqual(['Let me get a person.']);
+
+    const start = turn(null, { type: 'start' });
+    const handoff = turn(start.state, {
+      type: 'ai_result',
+      token: tokenOf(start.state),
+      outcome: 'handoff',
+    });
+    expect(handoff.effects).toContainEqual({
+      type: 'handoff',
+      note: 'The AI step asked for a person.',
+    });
+    expect(handoff.state.status).toBe('completed');
+  });
+});
+
 describe('the lead magnet starter (WORKSHOP scenario)', () => {
   const starter = STARTERS.find((s) => s.key === 'lead_magnet');
   const g = graph(starter?.graph ?? { nodes: [], edges: [] });

@@ -460,21 +460,25 @@ export const inboxRoutes =
         .map((n) => `- ${String((n.data as { text?: string }).text ?? '')}`)
         .join('\n');
       try {
-        const response = await aiClient(ai.apiKey).beta.messages.create({
-          model: ai.model.id,
-          max_tokens: 4000,
-          system: SUGGEST_SYSTEM,
-          output_config: { effort: 'low' },
-          ...(ai.model.fallbacks
-            ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
-            : {}),
-          messages: [
-            {
-              role: 'user',
-              content: `The business: ${ws?.name ?? 'this account'}.\n${noteText ? `Team notes about this person:\n${noteText}\n` : ''}\nThe conversation so far, oldest first:\n${transcript}\n\nDraft our next message to ${name}.`,
-            },
-          ],
-        });
+        const response = await aiClient(ai.apiKey).beta.messages.create(
+          {
+            model: ai.model.id,
+            max_tokens: 4000,
+            system: SUGGEST_SYSTEM,
+            output_config: { effort: 'low' },
+            ...(ai.model.fallbacks
+              ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
+              : {}),
+            messages: [
+              {
+                role: 'user',
+                content: `The business: ${ws?.name ?? 'this account'}.\n${noteText ? `Team notes about this person:\n${noteText}\n` : ''}\nThe conversation so far, oldest first:\n${transcript}\n\nDraft our next message to ${name}.`,
+              },
+            ],
+          },
+          // Someone is waiting on the button, behind a proxy that gives up at 100 seconds.
+          { timeout: 40_000, maxRetries: 1 },
+        );
         await recordUsage(db, { workspaceId: workspace.id, userId: user.id }, response);
         const text = response.content
           .flatMap((b) => (b.type === 'text' ? [b.text] : []))

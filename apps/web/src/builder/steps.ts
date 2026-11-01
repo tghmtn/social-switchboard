@@ -9,6 +9,7 @@ import {
   type Icon as PhosphorIcon,
   Play,
   Question,
+  Sparkle,
 } from '@phosphor-icons/react';
 import type { ConditionRule, FlowNode, FlowNodeType, NodeOf } from '@social-switchboard/flow';
 
@@ -43,11 +44,17 @@ export const STEP_META: Record<FlowNodeType, { label: string; icon: PhosphorIcon
       icon: Handshake,
       blurb: 'Pause automation so a person can reply',
     },
+    ai: {
+      label: 'AI conversation',
+      icon: Sparkle,
+      blurb: 'Let AI talk toward a goal and collect details',
+    },
   };
 
 export const ADDABLE: FlowNodeType[] = [
   'message',
   'ask',
+  'ai',
   'condition',
   'action',
   'delay',
@@ -122,6 +129,19 @@ export function defaultStep(type: FlowNodeType, position: { x: number; y: number
       return { id, type, position, data: { flowId: 'choose' } };
     case 'handoff':
       return { id, type, position, data: { note: '' } };
+    case 'ai':
+      return {
+        id,
+        type,
+        position,
+        data: {
+          goal: 'Answer their questions and find out what they need',
+          instructions: '',
+          collect: [],
+          maxTurns: 6,
+          timeoutHours: 24,
+        },
+      };
   }
 }
 
@@ -192,6 +212,13 @@ export function handleLabels(node: FlowNode): { id: string; label: string }[] {
         label: `${b.label} · ${Math.round((b.weight / total) * 100)}%`,
       }));
     }
+    case 'ai':
+      return [
+        { id: 'done', label: 'Goal met' },
+        { id: 'handoff', label: 'Needs a person' },
+        { id: 'gave_up', label: 'Didn’t get there' },
+        { id: 'timeout', label: 'No reply' },
+      ];
     case 'goto_flow':
     case 'handoff':
       return [];
@@ -229,6 +256,8 @@ export function summarize(node: FlowNode, flowName: (id: string) => string | und
       return `→ ${flowName(node.data.flowId) ?? 'Choose a flow'}`;
     case 'handoff':
       return node.data.note || 'Automation pauses until someone resumes it';
+    case 'ai':
+      return `${node.data.goal}${node.data.collect.length ? `\n→ collects ${node.data.collect.map((c) => `{{${c.key}}}`).join(', ')}` : ''}`;
   }
 }
 

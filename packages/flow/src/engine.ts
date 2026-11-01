@@ -23,7 +23,20 @@ export type ContactSnapshot = {
 export type RunWait =
   | { kind: 'delay'; nodeId: string; until: string; token: string }
   | { kind: 'input'; nodeId: string; attempts: number; until: string; token: string }
-  | { kind: 'choice'; nodeId: string; until: string; token: string };
+  | { kind: 'choice'; nodeId: string; until: string; token: string }
+  /**
+   * An AI step. `thinking`: the host is getting its next reply. `missed`: they wrote again
+   * meanwhile, so that reply is followed by another turn instead of waiting.
+   */
+  | {
+      kind: 'ai';
+      nodeId: string;
+      turns: number;
+      thinking: boolean;
+      missed: boolean;
+      until: string;
+      token: string;
+    };
 
 export type RunStatus = 'waiting' | 'completed' | 'failed' | 'expired';
 export type RunState = { status: RunStatus; wait?: RunWait; error?: string };
@@ -36,7 +49,15 @@ export type EngineEvent =
   /** A quick reply or button tapped on the step the run is waiting at. */
   | { type: 'choice'; nodeId: string; handle: string }
   /** A delay or reply timeout came due; `token` must match the current wait. */
-  | { type: 'wake'; token: string };
+  | { type: 'wake'; token: string }
+  /** The AI step's next turn, from the host; `token` must match the current wait. */
+  | {
+      type: 'ai_result';
+      token: string;
+      reply?: string;
+      fields?: Record<string, string>;
+      outcome: 'continue' | 'done' | 'handoff';
+    };
 
 export type OutboundButton =
   | { id: string; kind: 'url'; label: string; url: string }
@@ -56,7 +77,9 @@ export type Effect =
   | { type: 'set_consent'; channel: 'email' | 'sms'; granted: boolean }
   | { type: 'notify_team'; message: string }
   | { type: 'handoff'; note?: string }
-  | { type: 'start_flow'; flowId: string };
+  | { type: 'start_flow'; flowId: string }
+  /** The host should get the AI step's next reply and come back with an ai_result. */
+  | { type: 'ai_turn'; nodeId: string };
 
 export type AdvanceContext = {
   contact: ContactSnapshot;
@@ -139,7 +162,13 @@ class Runner {
         this.saveReply(node, reply.label);
         return this.done(this.follow(node.id, reply.id));
       }
+      case 'ai_result': {
+        if (wait.kind !== 'ai' || !wait.thinking || event.token !== wait.token)
+          return this.ignored(state);
+        return this.done(this.aiResult(wait, event));
+      }
       case 'message': {
+        if (wait.kind === 'ai') return this.done(this.aiMessage(wait));
         if (wait.kind === 'input') return this.done(this.answer(wait, event.text));
         if (wait.kind !== 'choice') return this.ignored(state);
         const node = this.nodeOf(wait.nodeId, 'message');
@@ -173,6 +202,69 @@ class Runner {
     if (wait.attempts >= node.data.maxRetries) return this.follow(node.id, 'failed');
     this.send(node.id, [{ type: 'text', text: node.data.retryMessage }]);
     return { status: 'waiting', wait: { ...wait, attempts: wait.attempts + 1 } };
+  }
+
+  /** They wrote to an AI step: ask for its next turn (or give up after maxTurns replies). */
+  private aiMessage(wait: Extract<RunWait, { kind: 'ai' }>): RunState {
+    if (wait.thinking) return { status: 'waiting', wait: { ...wait, missed: true } };
+    const node = this.nodeOf(wait.nodeId, 'ai');
+    if (!node) return { status: 'failed', error: `Step ${wait.nodeId} is missing.` };
+    if (wait.turns >= node.data.maxTurns) return this.follow(node.id, 'gave_up');
+    return this.aiTurn(node, wait.turns);
+  }
+
+  private aiTurn(node: NodeOf<'ai'>, turns: number): RunState {
+    this.effects.push({ type: 'ai_turn', nodeId: node.id });
+    return this.waitFor({
+      kind: 'ai',
+      nodeId: node.id,
+      turns,
+      thinking: true,
+      missed: false,
+      until: this.inHours(node.data.timeoutHours),
+    });
+  }
+
+  private aiResult(
+    wait: Extract<RunWait, { kind: 'ai' }>,
+    result: Extract<EngineEvent, { type: 'ai_result' }>,
+  ): RunState {
+    const node = this.nodeOf(wait.nodeId, 'ai');
+    if (!node) return { status: 'failed', error: `Step ${wait.nodeId} is missing.` };
+    const wanted = new Set(node.data.collect.map((c) => c.key));
+    for (const [key, value] of Object.entries(result.fields ?? {}))
+      if (wanted.has(key) && value.trim()) this.setField(key, value.trim().slice(0, 500));
+    // The AI's words go out as written (no {{templates}}: they're not the flow author's).
+    const reply = result.reply?.trim();
+    if (reply)
+      this.effects.push({
+        type: 'send',
+        nodeId: node.id,
+        message: {
+          parts: [{ type: 'text', text: reply.slice(0, 2000) }],
+          buttons: [],
+          quickReplies: [],
+        },
+      });
+    if (result.outcome === 'done') return this.follow(node.id, 'done');
+    if (result.outcome === 'handoff') {
+      if (this.g.next(node.id, 'handoff')) return this.follow(node.id, 'handoff');
+      this.effects.push({ type: 'handoff', note: 'The AI step asked for a person.' });
+      return { status: 'completed' };
+    }
+    const turns = wait.turns + 1;
+    if (wait.missed)
+      return turns >= node.data.maxTurns
+        ? this.follow(node.id, 'gave_up')
+        : this.aiTurn(node, turns);
+    return this.waitFor({
+      kind: 'ai',
+      nodeId: node.id,
+      turns,
+      thinking: false,
+      missed: false,
+      until: this.inHours(node.data.timeoutHours),
+    });
   }
 
   private follow(nodeId: string, handle: string): RunState {
@@ -254,6 +346,8 @@ class Runner {
         case 'handoff':
           this.effects.push({ type: 'handoff', note: node.data.note });
           return { status: 'completed' };
+        case 'ai':
+          return this.aiTurn(node, 0);
       }
     }
     return { status: 'completed' };
@@ -335,7 +429,7 @@ class Runner {
     return new Date(this.ctx.now.getTime() + hours * HOUR).toISOString();
   }
 
-  private nodeOf<T extends NodeOf<'message'>['type'] | NodeOf<'ask'>['type']>(id: string, type: T) {
+  private nodeOf<T extends 'message' | 'ask' | 'ai'>(id: string, type: T) {
     const node = this.g.node(id);
     return node?.type === type ? (node as NodeOf<T>) : undefined;
   }

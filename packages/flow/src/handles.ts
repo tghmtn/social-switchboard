@@ -19,6 +19,8 @@ export function outputHandles(node: FlowNode): string[] {
       return [...node.data.cases.map((c) => c.id), 'else'];
     case 'split':
       return node.data.branches.map((b) => b.id);
+    case 'ai':
+      return ['done', 'handoff', 'gave_up', 'timeout'];
     case 'goto_flow':
     case 'handoff':
       return [];

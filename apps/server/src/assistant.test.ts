@@ -303,6 +303,110 @@ describe.skipIf(!databaseUrl)('assistant', () => {
     expect(prompt).toContain('Fan: How much is the workshop?');
   });
 
+  it('runs an AI step in a flow: replies, collects a field, and leaves through "done"', async () => {
+    await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+    const flowId = (await call<{ flow: { id: string } }>('POST', '/api/flows', { name: 'Booking' }))
+      .body.flow.id;
+    const saved = await call<{ issues: unknown[] }>('PUT', `/api/flows/${flowId}/draft`, {
+      graph: {
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 } },
+          {
+            id: 'chat',
+            type: 'ai',
+            position: { x: 300, y: 0 },
+            data: {
+              goal: 'Find out which class they want and get their email',
+              instructions: 'Classes: Pottery (Saturdays), Painting (Sundays).',
+              collect: [{ key: 'email', description: 'their email address' }],
+            },
+          },
+          {
+            id: 'thanks',
+            type: 'message',
+            position: { x: 600, y: 0 },
+            data: { parts: [{ type: 'text', text: 'Thanks!' }] },
+          },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', sourceHandle: 'next', target: 'chat' },
+          { id: 'e2', source: 'chat', sourceHandle: 'done', target: 'thanks' },
+        ],
+      },
+    });
+    expect(saved.body.issues).toEqual([]);
+    const json = (o: object) => reply([{ type: 'text', text: JSON.stringify(o) }]);
+    type Sim = {
+      contact: { fields: Record<string, unknown> } | null;
+      messages: { content: { kind: string; message?: { parts: { text?: string }[] } } }[];
+      runs: { status: string }[];
+    };
+    const said = (s: Sim) =>
+      s.messages.flatMap((m) =>
+        m.content.kind === 'out' ? (m.content.message?.parts ?? []).map((p) => p.text) : [],
+      );
+
+    script = [json({ reply: 'Which class would you like?', fields: [], outcome: 'continue' })];
+    let sim = (await call<Sim>('POST', '/api/simulator/start', { flowId, version: 'draft' })).body;
+    expect(said(sim)).toEqual(['Which class would you like?']);
+    expect(requests[0]).toMatchObject({
+      output_config: { effort: 'low', format: { type: 'json_schema' } },
+    });
+    expect(JSON.stringify(requests[0])).toContain('Classes: Pottery (Saturdays)');
+
+    script = [
+      json({
+        reply: 'Pottery it is, see you Saturday!',
+        fields: [{ key: 'email', value: 'ada@example.com' }],
+        outcome: 'done',
+      }),
+    ];
+    sim = (
+      await call<Sim>('POST', '/api/simulator/send', { text: 'Pottery please, ada@example.com' })
+    ).body;
+    expect(said(sim)).toEqual([
+      'Which class would you like?',
+      'Pottery it is, see you Saturday!',
+      'Thanks!',
+    ]);
+    expect(sim.contact?.fields.email).toBe('ada@example.com');
+    expect(sim.runs[0]?.status).toBe('completed');
+    expect(JSON.stringify(requests[1])).toContain('Them: Pottery please, ada@example.com');
+  });
+
+  it('sends an AI step’s first reply as the private reply when a comment started the flow', async () => {
+    await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+    const flowId = (await call<{ flow: { id: string } }>('POST', '/api/flows', { name: 'Ask' }))
+      .body.flow.id;
+    await call('PUT', `/api/flows/${flowId}/draft`, {
+      graph: {
+        nodes: [
+          { id: 'start', type: 'start' },
+          { id: 'chat', type: 'ai', data: { goal: 'Answer their question about the workshop' } },
+        ],
+        edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'chat' }],
+      },
+    });
+    await call('POST', `/api/flows/${flowId}/publish`, {});
+    await call('POST', '/api/triggers', { flowId, config: { type: 'comment' } });
+    script = [
+      reply([
+        {
+          type: 'text',
+          text: JSON.stringify({ reply: 'It’s on Saturday!', fields: [], outcome: 'continue' }),
+        },
+      ]),
+    ];
+    const sim = (
+      await call<{
+        messages: { direction: string; content: { privateReplyTo?: string; message?: unknown } }[];
+      }>('POST', '/api/simulator/comment', { text: 'when is it?' })
+    ).body;
+    const out = sim.messages.filter((m) => m.direction === 'out');
+    expect(out).toHaveLength(1);
+    expect(out[0]?.content.privateReplyTo).toEqual(expect.any(String));
+  });
+
   it('needs a key before it can start', async () => {
     const thread = (await call<View>('POST', '/api/assistant/threads')).body;
     const res = await call('POST', `/api/assistant/threads/${thread.id}/messages`, { text: 'Hi' });

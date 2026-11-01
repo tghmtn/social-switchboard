@@ -45,6 +45,7 @@ Node types, their data, and their outputs:
 - split: data {"branches":[{"id":"a","label":"Version A","weight":50},{"id":"b","label":"Version B","weight":50}]} (random A/B). Outputs: each branch id.
 - goto_flow: data {"flowId":"<another flow's id>"}. No outputs.
 - handoff: data {"note":"..."}. Pauses automation for the person so someone can take over, and notifies the team. No outputs.
+- ai: data {"goal":"...","instructions":"facts, tone, rules","collect":[{"key":"email","description":"their email address"}],"maxTurns":6,"timeoutHours":24}. An AI-run conversation (using this workspace's AI key) that replies, collects the listed fields, and only uses facts from instructions. Outputs: "done" (goal met), "handoff" (a person should take over; with nothing connected it pauses the bot and notifies the team), "gave_up" (maxTurns replies without getting there), "timeout". Good for open questions a fixed flow can't cover; prefer plain message and ask steps for simple, predictable paths.
 
 Contact fields: first_name, last_name, email and phone are built in; any other lowercase key (like "interest") becomes a custom field. Messages can use {{first_name}} or {{first_name | there}} (a fallback when empty), and any field key the same way; URLs too, like https://example.com/register?email={{email}}.
 

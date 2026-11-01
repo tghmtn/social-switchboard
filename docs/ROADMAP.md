@@ -35,7 +35,7 @@ Several MIT-licensed open-source projects already cover parts of this. Each one 
 - **Build our own lean platform, borrowing heavily** from ChatbotX's MIT parts and from OpenReply. We're not forking or adopting either one. We get one clean license with nothing paid, a small stack (4 containers that fit a $6 VPS or a home server), a setup wizard aimed at non-developers, and an architecture that's ours.
 - **License: AGPL-3.0.** Anyone can use, deploy and modify it for free. Anyone who hosts a *modified* version for other people must share their changes, so it can't be closed up into a subscription product.
 - **Stack:** TypeScript end-to-end (see below).
-- **Pilot:** build and test on the maintainer's own account (`tgharring`, switched to Creator), with their spouse's account as the test commenter. The spouse's business account currently runs on ManyChat, so it moves over on a planned cutover day once Phase 2 is solid (see Phase 2).
+- **Pilot:** build and test on the maintainer's own account (switched to Creator), with their spouse's account as the test commenter. The spouse's business account currently runs on ManyChat, so it moves over on a planned cutover day once Phase 2 is solid (see Phase 2).
 - **Domain for this install:** `switchboard.gharring.com`, through a Cloudflare Tunnel.
 
 ## Borrowing rules
@@ -238,13 +238,15 @@ Each phase ends with something you can actually use.
 
 ### Phase 4: AI conversations
 
-> **Status (2026-11-01): AI keys and the in-app assistant built; the AI step and intent router next.**
+> **Status (2026-10-31): AI keys, the in-app assistant, the AI step and inbox suggestions built; the intent router next.**
 > - **Settings → AI:** an Anthropic API key (encrypted, bring your own; Anthropic bills it directly), the model (Claude Opus 5.5 by default, Sonnet 5.5, Haiku 5.5), effort (low, medium, high), a key test, this month's usage with an estimate from list prices, and a log of what the assistant did.
 > - **The assistant (✨ in the menu):** a panel beside any page. Claude works through the app's own API as the signed-in person (their role's permissions apply), with reading tools it uses freely (setup overview, flows, posts, contacts, a contact's history, the setup guide, file-link checks) and changing tools that wait for an Approve: create or change a flow (shown step by step), add a trigger, turn one on or off, publish. Turns run in the background (the panel checks back), the conversation is append-only as the API requires, the system prompt and tools are cached, and refusals fall back server-side.
-> - **Not yet:** OpenAI and local models (the settings and usage tables are ready for another provider), the AI step in flows, the intent router, and suggested replies in the inbox.
+> - **AI step in flows ("AI conversation"):** a goal, what it should know (facts, tone, rules), up to 10 details to collect into contact fields, a reply limit and a wait. Each turn Claude writes the next DM, picks out the details and says whether the goal is met, a person is needed, or the conversation goes on; the step leaves through Goal met, Needs a person (with nothing connected it pauses the bot and notifies the team), Didn't get there, or No reply. It only uses the facts it's given, answers a comment through the one private reply, catches up if the person writes again while it's thinking, and hands off on any error or a missing key. Calls run outside the database transaction with a 45-second limit.
+> - **Inbox ✨ Suggest:** drafts the next reply from the conversation and the team's notes, for a person to edit and send.
+> - **Not yet:** the intent router (a condition that branches on what a message is asking), knowledge from PDFs and URLs for the AI step, the "I'm stuck" setup helper with screenshots, and OpenAI or local models (the settings and usage tables are ready for another provider).
 
 - **AI keys in Settings** (Claude, OpenAI, or a local model), stored encrypted like the Meta secrets. Everything below uses them; nothing needs them.
-- **An in-app assistant that can act, not just chat (requested 2026-10-31).** It works through the app's own API as tools, the way an MCP server would, but inside the interface: "build a flow that sends my sling inspection PDF to anyone who comments SLING", "why didn't @ogharring get a reply?", "walk me through the webhooks step". It drafts flows and triggers on the canvas, reads contacts and logs to answer questions, and helps with channel setup. Every change it proposes is shown and confirmed before it's saved.
+- **An in-app assistant that can act, not just chat (requested 2026-10-31).** It works through the app's own API as tools, the way an MCP server would, but inside the interface: "build a flow that sends my sling inspection PDF to anyone who comments SLING", "why didn't my last commenter get a reply?", "walk me through the webhooks step". It drafts flows and triggers on the canvas, reads contacts and logs to answer questions, and helps with channel setup. Every change it proposes is shown and confirmed before it's saved.
 
 - **AI step:**
   - goal

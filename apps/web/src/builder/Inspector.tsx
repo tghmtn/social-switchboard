@@ -156,6 +156,9 @@ export function Inspector({
         </>
       );
       break;
+    case 'ai':
+      body = <AiForm step={step} onChange={onChange} ctx={ctx} />;
+      break;
     case 'start':
       break;
   }
@@ -409,6 +412,105 @@ function MessageForm({ step, onChange, ctx }: Props<'message'> & { ctx: Ctx }) {
           </>
         )}
       </Group>
+    </>
+  );
+}
+
+function AiForm({ step, onChange, ctx }: Props<'ai'> & { ctx: Ctx }) {
+  const d = step.data;
+  const set = (data: Partial<typeof d>) => onChange({ ...step, data: { ...d, ...data } });
+  return (
+    <>
+      <p className="text-[14px] text-muted">
+        The workspace’s AI (Settings → AI) carries the conversation: it replies, asks follow-ups and
+        fills in the details below, then leaves through one of the exits. It only uses facts you
+        give it here, and replies with the person’s words in mind, one message at a time.
+      </p>
+      <TextArea
+        label="Goal"
+        value={d.goal}
+        rows={2}
+        maxLength={1000}
+        placeholder="Find out which class they want and get their email"
+        onChange={(e) => set({ goal: e.target.value })}
+      />
+      <TextArea
+        label="What it should know (optional)"
+        value={d.instructions}
+        rows={6}
+        maxLength={8000}
+        placeholder={
+          'Prices, dates, links, your tone, what not to promise…\nClasses: Pottery on Saturdays ($40), Painting on Sundays ($35).'
+        }
+        hint="Facts, tone and rules. It won’t invent anything that isn’t here or in the conversation."
+        onChange={(e) => set({ instructions: e.target.value })}
+      />
+      <fieldset className="grid gap-2">
+        <legend className="mb-1 text-sm font-bold">Details to collect</legend>
+        {d.collect.map((c, i) => (
+          <div key={c.key || i} className="grid grid-cols-[1fr_1.4fr_auto] items-end gap-2">
+            <FieldKeyInput
+              label="Save to"
+              value={c.key}
+              keys={ctx.fieldKeys}
+              onChange={(v) =>
+                set({ collect: d.collect.map((x, j) => (j === i ? { ...x, key: v } : x)) })
+              }
+            />
+            <Field
+              label="What it is"
+              value={c.description}
+              maxLength={200}
+              placeholder="their email address"
+              onChange={(e) =>
+                set({
+                  collect: d.collect.map((x, j) =>
+                    j === i ? { ...x, description: e.target.value } : x,
+                  ),
+                })
+              }
+            />
+            <button
+              type="button"
+              className="linkbtn mb-3 text-[13px] text-danger"
+              onClick={() => set({ collect: d.collect.filter((_, j) => j !== i) })}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        {d.collect.length < 10 && (
+          <button
+            type="button"
+            className="btn btn-sm w-fit"
+            onClick={() =>
+              set({
+                collect: [...d.collect, { key: `detail_${d.collect.length + 1}`, description: '' }],
+              })
+            }
+          >
+            + Detail
+          </button>
+        )}
+      </fieldset>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label="Most replies before giving up"
+          type="number"
+          min={1}
+          max={20}
+          value={d.maxTurns}
+          onChange={(e) => set({ maxTurns: num(e.target.value, d.maxTurns) })}
+        />
+        <Field
+          label="Wait up to (hours)"
+          type="number"
+          min={1}
+          max={720}
+          value={d.timeoutHours}
+          onChange={(e) => set({ timeoutHours: num(e.target.value, d.timeoutHours) })}
+        />
+      </div>
     </>
   );
 }

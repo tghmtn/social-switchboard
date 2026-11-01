@@ -197,6 +197,27 @@ export const flowNode = z.discriminatedUnion('type', [
     type: z.literal('handoff'),
     data: z.object({ note: z.string().max(500).optional() }),
   }),
+  /**
+   * A conversation run by AI toward a goal: it replies, collects fields, and leaves through
+   * "done" (goal met), "handoff" (a person should take over), "gave_up" (maxTurns replies
+   * without getting there) or "timeout" (they stopped answering). Needs the workspace's AI key.
+   */
+  z.object({
+    ...base,
+    type: z.literal('ai'),
+    data: z.object({
+      goal: z.string().trim().min(1).max(1000),
+      /** Business facts, tone and rules the AI should follow. */
+      instructions: z.string().max(8000).default(''),
+      /** Contact fields to fill in from what they say. */
+      collect: z
+        .array(z.object({ key: fieldKey, description: z.string().trim().max(200).default('') }))
+        .max(10)
+        .default([]),
+      maxTurns: z.number().int().min(1).max(20).default(6),
+      timeoutHours,
+    }),
+  }),
 ]);
 
 // Edge ids never leave the graph, so any reasonable string will do (React Flow makes its own).
