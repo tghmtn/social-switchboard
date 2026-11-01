@@ -1,9 +1,19 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { api, type ContactDetail as Detail, useApi } from '../api';
+import { api, avatarUrl, type ContactDetail as Detail, useApi } from '../api';
 import { Avatar, Field, FormError, Toggle, timeAgo } from '../ui';
 import { contactName } from './Contacts';
 import { Page } from './Shell';
+
+/** What the channel told us about them: "Follows you · 1,204 followers". */
+function profileFacts(i: Detail['identities'][number]) {
+  const facts = [
+    i.followsUs === true ? 'Follows you' : i.followsUs === false ? 'Doesn’t follow you' : null,
+    i.weFollow ? 'You follow them' : null,
+    i.followerCount !== null ? `${i.followerCount.toLocaleString()} followers` : null,
+  ].filter(Boolean);
+  return facts.join(' · ');
+}
 
 const RUN_CHIP: Record<string, string> = {
   waiting: 'chip-orange',
@@ -102,7 +112,7 @@ export function ContactDetail() {
         ← Contacts
       </Link>
       <div className="-mt-4 flex flex-wrap items-center gap-4">
-        <Avatar name={contactName(c)} size={64} />
+        <Avatar name={contactName(c)} size={64} src={avatarUrl(c)} />
         <div className="grid min-w-0 flex-1 gap-1.5">
           <h1 className="font-display text-display-lg font-extrabold break-words">
             {contactName(c)}
@@ -112,8 +122,17 @@ export function ContactDetail() {
               <span key={`${i.channel}${i.externalId}`} className="chip">
                 {i.channel}
                 {i.username ? ` @${i.username}` : ''}
+                {i.verified ? ' ✓' : ''}
               </span>
             ))}
+            {data.identities
+              .map((i) => profileFacts(i))
+              .filter(Boolean)
+              .map((facts) => (
+                <span key={facts} className="text-[13px] text-muted">
+                  {facts}
+                </span>
+              ))}
             <span className="text-[13px] text-muted">Last seen {timeAgo(c.lastSeenAt)}</span>
           </div>
         </div>

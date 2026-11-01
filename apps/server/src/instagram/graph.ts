@@ -459,19 +459,57 @@ export async function subscribe(igUserId: string, token: string, host: Host = 'i
   }
 }
 
-/** A person's username, by the id they message us from. Best effort. */
-export async function lookupUsername(
+/** What Instagram shares about someone, once they've messaged the account. */
+export type UserProfile = {
+  name?: string;
+  username?: string;
+  profile_pic?: string;
+  follower_count?: number;
+  is_user_follow_business?: boolean;
+  is_business_follow_user?: boolean;
+  is_verified_user?: boolean;
+};
+
+/**
+ * Someone's Instagram profile, by the id they message from. Instagram answers only after they've
+ * messaged us (a comment isn't enough); undefined otherwise.
+ */
+export async function userProfile(
   token: string,
   igsid: string,
   host: Host = 'instagram',
-): Promise<string | undefined> {
-  try {
+): Promise<UserProfile | undefined> {
+  const fields = [
+    'name',
+    'username',
+    'profile_pic',
+    'follower_count',
+    'is_user_follow_business',
+    'is_business_follow_user',
+  ];
+  const ask = async (list: string[]) => {
     const url = new URL(`${base(host)}/${igsid}`);
-    url.searchParams.set('fields', 'username,name');
-    const data = await call<{ username?: string; name?: string }>(
-      await http(url, { headers: bearer(token) }),
-    );
-    return data.username;
+    url.searchParams.set('fields', list.join(','));
+    return call<UserProfile>(await http(url, { headers: bearer(token) }));
+  };
+  try {
+    return await ask([...fields, 'is_verified_user']);
+  } catch (err) {
+    // Not every API version offers is_verified_user; the rest is still worth having.
+    if (!(err instanceof MetaError && err.code === 100)) return undefined;
+    return ask(fields).catch(() => undefined);
+  }
+}
+
+/** Downloads a small image (a profile picture): https, image/*, at most 2MB. */
+export async function downloadImage(url: string) {
+  if (!/^https:\/\//i.test(url)) return undefined;
+  try {
+    const res = await http(url, { signal: AbortSignal.timeout(8000) });
+    const contentType = res.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
+    if (!res.ok || !contentType.startsWith('image/')) return undefined;
+    const data = Buffer.from(await res.arrayBuffer());
+    return data.length > 0 && data.length <= 2 * 1024 * 1024 ? { contentType, data } : undefined;
   } catch {
     return undefined;
   }

@@ -1,8 +1,8 @@
 import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { contactIdentities, instagramAccounts, webhookEvents } from '../db/schema';
+import { instagramAccounts, webhookEvents } from '../db/schema';
 import { type RuntimeDeps, receive, receiveComment } from '../runtime/runtime';
-import { lookupUsername } from './graph';
+import { newContactProfile, saveAvatar, saveProfile, staleProfile } from './profiles';
 import { decryptOptional } from './settings';
 
 // Turns stored Instagram webhook deliveries into runtime calls. Payload shapes follow Meta's
@@ -94,28 +94,7 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
     if (!account) continue; // an account this install doesn't (or no longer does) manage
     const token = decryptOptional(deps.appSecret, account.accessTokenEnc);
     const base = { workspaceId: account.workspaceId, channel: 'instagram', accountRef: entry.id };
-
-    // Ask Instagram for a username the first time we meet someone, so contacts aren't just numbers.
-    const profileFor = async (igsid: string, known?: string) => {
-      if (known) return { username: known };
-      const [existing] = await deps.db
-        .select({ id: contactIdentities.contactId })
-        .from(contactIdentities)
-        .where(
-          and(
-            eq(contactIdentities.workspaceId, account.workspaceId),
-            eq(contactIdentities.channel, 'instagram'),
-            eq(contactIdentities.externalId, igsid),
-          ),
-        );
-      if (existing || !token) return undefined;
-      const username = await lookupUsername(
-        token,
-        igsid,
-        account.apiHost === 'facebook' ? 'facebook' : 'instagram',
-      );
-      return username ? { username } : undefined;
-    };
+    const host = account.apiHost === 'facebook' ? 'facebook' : 'instagram';
 
     for (const change of entry.changes ?? []) {
       const v = change.value;
@@ -124,7 +103,8 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
       await receiveComment(deps.runtime, {
         ...base,
         externalId: v.from.id,
-        profile: await profileFor(v.from.id, v.from.username),
+        // A comment carries their username; Instagram shares more only once they've messaged.
+        profile: v.from.username ? { username: v.from.username } : undefined,
         commentId: v.id,
         // A comment on a boosted post carries the ad's media id; triggers are set on the original post.
         mediaId: v.media?.original_media_id ?? v.media?.id,
@@ -141,14 +121,24 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
       const ref = m.referral?.ref;
       if (text === undefined && payloadValue === undefined && ref === undefined && !m.message)
         continue;
+      // They've messaged us, so Instagram will share their profile (fetched at most weekly).
+      // Names go in before the flow runs, so even the first reply can greet them by name.
+      const profile = token
+        ? await staleProfile(deps.db, account.workspaceId, sender, token, host)
+        : undefined;
+      const known = profile && (await saveProfile(deps.db, account.workspaceId, sender, profile));
       await receive(deps.runtime, {
         ...base,
         externalId: sender,
-        profile: await profileFor(sender),
+        profile: newContactProfile(profile),
         text,
         payload: payloadValue,
         ref,
       });
+      if (profile) {
+        if (!known) await saveProfile(deps.db, account.workspaceId, sender, profile);
+        await saveAvatar(deps.db, account.workspaceId, sender, profile.profile_pic);
+      }
     }
   }
 }

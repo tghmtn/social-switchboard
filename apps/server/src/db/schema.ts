@@ -9,6 +9,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -118,6 +119,16 @@ export const contactIdentities = pgTable(
     username: text('username'),
     /** The connected account this person talks to, e.g. our Instagram account's id. */
     accountRef: text('account_ref'),
+    /**
+     * What the channel shares about them (Instagram: only once they've messaged), refreshed
+     * now and then. Null until known.
+     */
+    displayName: text('display_name'),
+    followsUs: boolean('follows_us'),
+    weFollow: boolean('we_follow'),
+    followerCount: integer('follower_count'),
+    verified: boolean('verified'),
+    profileSyncedAt: timestamp('profile_synced_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -125,6 +136,19 @@ export const contactIdentities = pgTable(
     index('contact_identities_contact_idx').on(t.contactId),
   ],
 );
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+
+/** A contact's profile picture, kept here because the channel's own links expire. */
+export const contactAvatars = pgTable('contact_avatars', {
+  contactId: uuid('contact_id')
+    .primaryKey()
+    .references(() => contacts.id, { onDelete: 'cascade' }),
+  workspaceId: workspaceId(),
+  contentType: text('content_type').notNull(),
+  data: bytea('data').notNull(),
+  updatedAt: updatedAt(),
+});
 
 export const tags = pgTable(
   'tags',

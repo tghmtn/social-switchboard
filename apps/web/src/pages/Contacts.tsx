@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { type ContactRow, type Tag, useApi } from '../api';
+import { avatarUrl, type ContactRow, type Tag, useApi } from '../api';
 import { Avatar, EmptyState, PageHeader, timeAgo } from '../ui';
 import { Page } from './Shell';
 
@@ -141,7 +141,7 @@ export function Contacts() {
                       to={`/contacts/${c.id}`}
                       className="flex items-center gap-3 font-bold text-ink no-underline hover:underline"
                     >
-                      <Avatar name={contactName(c)} size={32} />
+                      <Avatar name={contactName(c)} size={32} src={avatarUrl(c)} />
                       <span className="truncate">{contactName(c)}</span>
                       {c.automationPausedAt && (
                         <span className="chip chip-orange">Needs a person</span>

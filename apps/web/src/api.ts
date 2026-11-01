@@ -105,12 +105,18 @@ export type ContactRow = {
   email: string | null;
   phone: string | null;
   username: string | null;
+  /** Set when a profile picture is kept: part of the picture's URL (see avatarUrl). */
+  avatarVersion: number | null;
   tags: string[];
   channels: string[];
   automationPausedAt: string | null;
   lastSeenAt: string | null;
   createdAt: string;
 };
+/** A contact's kept profile picture, if any. */
+export const avatarUrl = (c: { id: string; avatarVersion: number | null }) =>
+  c.avatarVersion ? `/api/contacts/${c.id}/avatar?v=${c.avatarVersion}` : undefined;
+
 export type ContactDetail = {
   contact: {
     id: string;
@@ -118,13 +124,25 @@ export type ContactDetail = {
     lastName: string | null;
     email: string | null;
     phone: string | null;
+    avatarVersion: number | null;
     tags: string[];
     fields: { key: string; label: string; type: string; value: string | number | boolean | null }[];
     automationPausedAt: string | null;
     lastSeenAt: string | null;
     createdAt: string;
   };
-  identities: { channel: string; externalId: string; username: string | null }[];
+  identities: {
+    channel: string;
+    externalId: string;
+    username: string | null;
+    /** What the channel shares (Instagram: once they've messaged). Null until known. */
+    displayName: string | null;
+    followsUs: boolean | null;
+    weFollow: boolean | null;
+    followerCount: number | null;
+    verified: boolean | null;
+    profileSyncedAt: string | null;
+  }[];
   consents: { channel: string; granted: boolean; source: string; at: string }[];
   events: { id: number; type: string; data: Record<string, unknown>; at: string }[];
   runs: {

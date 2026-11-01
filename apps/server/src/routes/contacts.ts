@@ -7,6 +7,7 @@ import { csvRow } from '../csv';
 import type { Tx } from '../db/client';
 import {
   consents,
+  contactAvatars,
   contactEvents,
   contactIdentities,
   contacts,
@@ -34,6 +35,11 @@ const channelsOf = sql<string[]>`coalesce((
   select array_agg(distinct ci.channel) from contact_identities ci where ci.contact_id = ${CONTACT_ID}), '{}')`;
 const usernameOf = sql<string | null>`(
   select ci.username from contact_identities ci where ci.contact_id = ${CONTACT_ID} and ci.username is not null limit 1)`;
+/** Changes when the picture does, so the browser can cache /contacts/:id/avatar?v= for good. */
+const avatarVersionOf = sql<number | null>`(
+  select floor(extract(epoch from ca.updated_at))::bigint from contact_avatars ca where ca.contact_id = ${CONTACT_ID})`.mapWith(
+  (v) => (v === null ? null : Number(v)),
+);
 
 const listQuery = z.object({
   q: z.string().trim().max(200).optional(),
@@ -97,6 +103,7 @@ export const contactRoutes =
             email: contacts.email,
             phone: contacts.phone,
             username: usernameOf,
+            avatarVersion: avatarVersionOf,
             tags: tagsOf,
             channels: channelsOf,
             automationPausedAt: contacts.automationPausedAt,
@@ -111,6 +118,21 @@ export const contactRoutes =
         db.select({ n: count() }).from(contacts).where(where),
       ]);
       return { contacts: rows, total: total?.n ?? 0 };
+    });
+
+    /** Their profile picture, kept from the channel. Cached for good: the URL carries ?v=. */
+    app.get('/contacts/:id/avatar', async (req, reply) => {
+      const { workspace } = who(req);
+      const { id } = z.object({ id: z.uuid() }).parse(req.params);
+      const [avatar] = await db
+        .select({ contentType: contactAvatars.contentType, data: contactAvatars.data })
+        .from(contactAvatars)
+        .where(and(eq(contactAvatars.contactId, id), eq(contactAvatars.workspaceId, workspace.id)));
+      if (!avatar) throw notFound('Picture');
+      return reply
+        .header('content-type', avatar.contentType)
+        .header('cache-control', 'private, max-age=31536000, immutable')
+        .send(avatar.data);
     });
 
     // Registered before /contacts/:id so "export.csv" isn't taken for an id.
@@ -186,7 +208,7 @@ export const contactRoutes =
       const { workspace } = who(req);
       const { id } = z.object({ id: z.uuid() }).parse(req.params);
       const [row] = await db
-        .select({ c: contacts, tags: tagsOf })
+        .select({ c: contacts, tags: tagsOf, avatarVersion: avatarVersionOf })
         .from(contacts)
         .where(and(eq(contacts.id, id), eq(contacts.workspaceId, workspace.id)));
       if (!row) throw notFound('Contact');
@@ -197,6 +219,12 @@ export const contactRoutes =
             channel: contactIdentities.channel,
             externalId: contactIdentities.externalId,
             username: contactIdentities.username,
+            displayName: contactIdentities.displayName,
+            followsUs: contactIdentities.followsUs,
+            weFollow: contactIdentities.weFollow,
+            followerCount: contactIdentities.followerCount,
+            verified: contactIdentities.verified,
+            profileSyncedAt: contactIdentities.profileSyncedAt,
           })
           .from(contactIdentities)
           .where(eq(contactIdentities.contactId, id)),
@@ -254,6 +282,7 @@ export const contactRoutes =
           lastName: c.lastName,
           email: c.email,
           phone: c.phone,
+          avatarVersion: row.avatarVersion,
           tags: row.tags,
           fields: defs.map((d) => ({ ...d, value: c.customFields[d.key] ?? null })),
           automationPausedAt: c.automationPausedAt,

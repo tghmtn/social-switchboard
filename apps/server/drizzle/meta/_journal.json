@@ -64,6 +64,13 @@
       "when": 1793502440501,
       "tag": "0008_webhook_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793503678655,
+      "tag": "0009_contact_profiles",
+      "breakpoints": true
     }
   ]
 }

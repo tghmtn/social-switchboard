@@ -6,6 +6,7 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
 } from 'react';
 import { SquareIcon, type SquareIconName } from './components/SquareIcons';
 
@@ -254,8 +255,9 @@ export function Dialog({
   );
 }
 
-/** Two-letter initials in a circle: the theme's one rounded element. */
-export function Avatar({ name, size = 38 }: { name: string; size?: number }) {
+/** Their picture, or two-letter initials, in a circle: the theme's one rounded element. */
+export function Avatar({ name, size = 38, src }: { name: string; size?: number; src?: string }) {
+  const [broken, setBroken] = useState(false);
   const initials =
     name
       .split(/\s+/)
@@ -263,9 +265,20 @@ export function Avatar({ name, size = 38 }: { name: string; size?: number }) {
       .slice(0, 2)
       .map((w) => w[0]?.toUpperCase())
       .join('') || '?';
+  const box = 'inline-flex shrink-0 items-center justify-center rounded-full border-2 border-edge';
+  if (src && !broken)
+    return (
+      <img
+        src={src}
+        alt=""
+        className={`${box} bg-surface-2 object-cover`}
+        style={{ width: size, height: size }}
+        onError={() => setBroken(true)}
+      />
+    );
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center rounded-full border-2 border-edge bg-surface-2 text-[13px] font-bold"
+      className={`${box} bg-surface-2 text-[13px] font-bold`}
       style={{ width: size, height: size }}
       aria-hidden="true"
     >

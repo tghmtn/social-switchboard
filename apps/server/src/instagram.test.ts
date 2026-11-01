@@ -137,6 +137,8 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
           : undefined;
     calls.push({ method: init?.method ?? 'GET', url, body });
     const path = url.pathname.replace(/^\/v[\d.]+/, '');
+    if (url.host === 'cdn.example.test')
+      return new Response('fake-jpeg', { headers: { 'content-type': 'image/jpeg' } });
     if (url.host === 'files.example.test')
       return new Response(null, {
         headers: { 'content-type': path.endsWith('.pdf') ? 'application/pdf' : 'text/html' },
@@ -190,7 +192,15 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
           )
         : json({ recipient_id: 'x', message_id: `mid.${calls.length}` });
     if (path.endsWith('/replies')) return json({ id: 'reply-1' });
-    if (path === '/fan-igsid') return json({ username: 'fan_account' });
+    if (path === '/fan-igsid')
+      return json({
+        username: 'fan_account',
+        name: 'Fan Person',
+        profile_pic: 'https://cdn.example.test/fan.jpg',
+        follower_count: 12,
+        is_user_follow_business: true,
+        is_business_follow_user: false,
+      });
     return json({ error: { message: `unexpected ${path}`, code: 100 } }, 400);
   };
 
@@ -609,6 +619,71 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(sends()).toHaveLength(1);
     const inbound = await db.select().from(messages).where(eq(messages.direction, 'in'));
     expect(inbound).toHaveLength(1);
+  });
+
+  it('fills in a contact from their Instagram profile once they message', async () => {
+    await connect();
+    const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
+      name: 'Hello',
+      starter: 'blank',
+    });
+    await call('PUT', `/api/flows/${body.flow.id}/draft`, {
+      graph: {
+        nodes: [
+          { id: 'start', type: 'start' },
+          {
+            id: 'a',
+            type: 'message',
+            data: { parts: [{ type: 'text', text: 'Hi {{first_name | there}}!' }] },
+          },
+        ],
+        edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'a' }],
+      },
+    });
+    await call('POST', `/api/flows/${body.flow.id}/publish`, {});
+    await call('POST', '/api/triggers', {
+      flowId: body.flow.id,
+      config: { type: 'keyword', keywords: ['hello'], match: 'exact' },
+    });
+    const dm = (mid: string, text: string) => ({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ID,
+          messaging: [
+            { sender: { id: 'fan-igsid' }, recipient: { id: IG_ID }, message: { mid, text } },
+          ],
+        },
+      ],
+    });
+    calls = [];
+    await webhook(dm('in-1', 'hello'));
+    await settled();
+
+    // Fetched before the flow ran, so the very first reply knows their name.
+    expect(sends()[0]?.body).toMatchObject({ message: { text: 'Hi Fan!' } });
+    type Listed = { id: string; firstName: string; lastName: string; avatarVersion: number };
+    const list = await call<{ contacts: Listed[] }>('GET', '/api/contacts');
+    const fan = list.body.contacts[0];
+    expect(fan).toMatchObject({ firstName: 'Fan', lastName: 'Person', username: 'fan_account' });
+    expect(fan?.avatarVersion).toEqual(expect.any(Number));
+    const detail = await call<{ identities: object[] }>('GET', `/api/contacts/${fan?.id}`);
+    expect(detail.body.identities[0]).toMatchObject({
+      displayName: 'Fan Person',
+      followsUs: true,
+      weFollow: false,
+      followerCount: 12,
+    });
+    // The picture is kept here, since Instagram's link expires.
+    const avatar = await app.inject({ url: `/api/contacts/${fan?.id}/avatar`, cookies });
+    expect(avatar.headers['content-type']).toBe('image/jpeg');
+    expect(avatar.body).toBe('fake-jpeg');
+
+    // Within a week, another message doesn't ask Instagram again.
+    calls = [];
+    await webhook(dm('in-2', 'hello again'));
+    await settled();
+    expect(calls.some((c) => c.url.pathname.endsWith('/fan-igsid'))).toBe(false);
   });
 
   it('rejects unsigned webhooks', async () => {
