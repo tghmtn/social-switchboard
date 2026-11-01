@@ -281,12 +281,21 @@ export type InboxDetail = {
   notes: { id: number; text: string; by: string; at: string }[];
   team: { id: string; name: string }[];
 };
+export type AiProvider = 'anthropic' | 'openai';
+type AiProviderSettings = { hasKey: boolean; keyHint: string | null; model: string | null };
 export type AiSettings = {
-  model: string;
+  provider: AiProvider;
+  providers: { id: AiProvider; label: string }[];
   effort: string;
-  hasKey: boolean;
-  models: { id: string; label: string; note: string; input: number; output: number }[];
   efforts: string[];
+  anthropic: AiProviderSettings;
+  openai: AiProviderSettings;
+  /** The chosen provider has a key and a model, so AI features work. */
+  ready: boolean;
+};
+export type AiModelList = {
+  models: { id: string; label: string; created: string; note?: string }[];
+  suggested: string | null;
 };
 export type AiUsage = {
   since: string;
@@ -298,7 +307,8 @@ export type AiUsage = {
     output: number;
     cacheRead: number;
     cacheWrite: number;
-    estimatedCost: number;
+    /** Null when we don't know the model's prices. */
+    estimatedCost: number | null;
   }[];
   actions: { tool: string; decision: string; ok: boolean; summary: string; at: string }[];
 };
@@ -313,7 +323,28 @@ export type AssistantItem =
       changes: boolean;
       detail: string[];
       error?: string;
+      /** A page the assistant opened beside the chat. */
+      navigate?: string;
+      /** The flow a change was made to. */
+      flowId?: string;
+    }
+  | {
+      type: 'ask';
+      id: string;
+      question: string;
+      help?: string;
+      kind: string;
+      options: string[];
+      placeholder?: string;
+      step?: number;
+      steps?: number;
+      /** The plan, as short steps. */
+      overview?: string[];
+      state: 'waiting' | 'answered' | 'skipped';
+      answer?: string;
     };
+/** Sent on window when the assistant changed a flow (detail: { flowId }), so an open builder reloads. */
+export const FLOW_CHANGED = 'switchboard:flow-changed';
 export type AssistantThread = {
   id: string;
   title: string;

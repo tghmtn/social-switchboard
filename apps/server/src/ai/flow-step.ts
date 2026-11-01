@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../db/client';
 import { contacts, flowVersions, messages, runs } from '../db/schema';
 import type { AiRoute, AiTurn, AiTurnResult } from '../runtime/runtime';
-import { aiClient, recordUsage, workspaceAi } from './client';
+import { recordUsage, structured, type WorkspaceAi, workspaceAi } from './client';
 
 // The AI steps in flows. A turn of an AI conversation: given the step's goal and the
 // conversation so far, Claude writes the next reply, picks out the fields the step collects, and
@@ -32,7 +32,6 @@ type Deps = {
   appSecret: string;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
 };
-type WorkspaceAi = NonNullable<Awaited<ReturnType<typeof workspaceAi>>>;
 
 /** One line of a message, for the transcript. */
 function line(direction: string, content: unknown) {
@@ -90,28 +89,17 @@ async function askFor(
   ai: WorkspaceAi,
   request: { system: string; brief: string; schema: Record<string, unknown>; maxTokens: number },
 ): Promise<unknown> {
-  const response = await aiClient(ai.apiKey).beta.messages.create(
-    {
-      model: ai.model.id,
-      max_tokens: request.maxTokens,
-      system: request.system,
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: request.schema } },
-      ...(ai.model.fallbacks
-        ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
-        : {}),
-      messages: [{ role: 'user', content: request.brief }],
-    },
+  const { value, usage } = await structured(ai, {
+    system: request.system,
+    prompt: request.brief,
+    name: 'answer',
+    schema: request.schema,
+    maxTokens: request.maxTokens,
     // The webhook pass that started this holds its event for two minutes: answer well before.
-    { timeout: 45_000, maxRetries: 1 },
-  );
-  await recordUsage(db, { workspaceId }, response);
-  if (response.stop_reason === 'refusal') return undefined;
-  const text = response.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
+    timeoutMs: 45_000,
+  });
+  await recordUsage(db, { workspaceId }, usage);
+  return value;
 }
 
 export function aiStepper(deps: Deps) {
@@ -160,7 +148,7 @@ export function aiStepper(deps: Deps) {
       await askFor(db, t.workspaceId, ai, {
         system: SYSTEM,
         brief,
-        maxTokens: 4000,
+        maxTokens: 8000,
         schema: {
           type: 'object',
           properties: {
@@ -228,7 +216,7 @@ export function aiRouter(deps: Deps) {
       await askFor(db, t.workspaceId, ai, {
         system: ROUTE_SYSTEM,
         brief,
-        maxTokens: 2000,
+        maxTokens: 4000,
         schema: {
           type: 'object',
           properties: { intent: { type: 'string', enum: [...ids, 'none'] } },

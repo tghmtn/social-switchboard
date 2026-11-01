@@ -1,17 +1,27 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../db/client';
 import { type AssistantPending, aiActions, assistantThreads } from '../db/schema';
-import { aiClient, aiErrorText, recordUsage, workspaceAi } from './client';
+import {
+  aiErrorText,
+  chatStep,
+  recordUsage,
+  type StoredBlock,
+  type StoredMessage,
+  type Tool,
+  workspaceAi,
+} from './client';
 import { SYSTEM_PROMPT } from './prompt';
 
-// The in-app assistant: a Claude tool loop over the app's own API. Reading tools run right away;
-// changing tools wait for the person to approve them (the loop stops, the thread is saved, and
-// it carries on from their decision). The conversation is append-only, as the API requires.
+// The in-app assistant: a tool loop over the app's own API, on whichever AI provider the
+// workspace chose. Reading tools run right away; changing tools wait for the person to approve
+// them, and questions wait for their answer (the loop stops, the thread is saved, and it carries
+// on from there). The conversation is append-only, as the APIs require.
 
-type Message = Anthropic.Beta.BetaMessageParam;
-type ToolResult = Anthropic.Beta.BetaToolResultBlockParam;
+type ToolUse = StoredBlock & { type: 'tool_use'; id: string; name: string; input: unknown };
+type ToolResult = { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
+const isToolUse = (b: StoredBlock): b is ToolUse =>
+  b.type === 'tool_use' && typeof b.id === 'string' && typeof b.name === 'string';
 
 /** Calls this install's own API as the signed-in person (their permissions apply). */
 export type ApiCall = (
@@ -42,7 +52,7 @@ const graphSchema = {
 };
 const id = (description: string) => ({ type: 'string', description });
 
-export const TOOLS: Anthropic.Beta.BetaTool[] = [
+export const TOOLS: Tool[] = [
   {
     name: 'get_overview',
     description:
@@ -104,6 +114,47 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
     input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
   },
   {
+    name: 'open_page',
+    description:
+      'Shows a page of the app beside this chat, so the person sees what you mean or what you just built. Paths: / (Today), /flows, /flows/<flowId> (the builder), /contacts, /contacts/<contactId>, /inbox, /inbox/<contactId>, /channels, /channels/instagram (Instagram setup), /simulator, /settings.',
+    input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+  },
+  {
+    name: 'ask_user',
+    description:
+      'Asks the person one question and waits for the answer, shown as a card they fill in or a choice they tap. Use it to gather what you need one thing at a time; ask it on its own, not alongside other tools.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'One short question.' },
+        help: {
+          type: 'string',
+          description: 'One or two sentences: why you need it, an example, or where to find it.',
+        },
+        kind: {
+          type: 'string',
+          enum: ['text', 'long_text', 'url', 'email', 'number', 'choice'],
+          description: 'The input to show. Defaults to text.',
+        },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'For choice: 2 to 6 short options. They can also type their own answer.',
+        },
+        placeholder: { type: 'string', description: 'An example answer for the empty field.' },
+        overview: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'On the first question of a bigger job: your plan as 3 to 5 short steps (a few words each), shown above the question with their progress. Send it again only if the plan changes.',
+        },
+        step: { type: 'integer', description: 'Which step of your plan this is, from 1.' },
+        steps: { type: 'integer', description: 'How many steps your plan has.' },
+      },
+      required: ['question'],
+    },
+  },
+  {
     name: 'create_flow',
     description:
       'Proposes a new flow (saved as a draft, not published). The person approves it first. Returns the new flow id and any wiring problems.',
@@ -163,6 +214,13 @@ export const CHANGING_TOOLS = new Set([
   'set_trigger_enabled',
   'publish_flow',
 ]);
+/** Waits for the person's answer. */
+export const ASK_TOOL = 'ask_user';
+const waitsForPerson = (name: string) => CHANGING_TOOLS.has(name) || name === ASK_TOOL;
+
+/** Pages the assistant may open. */
+export const PAGE_PATH =
+  /^\/(flows(\/[\w-]{1,64})?|contacts(\/[\w-]{1,64})?|inbox(\/[\w-]{1,64})?|channels(\/instagram)?|simulator|settings)?$/;
 
 // ---------------------------------------------------------------- tool inputs
 
@@ -171,6 +229,7 @@ const inputs = {
   find_contacts: z.object({ query: z.string().max(200) }),
   get_contact_history: z.object({ contactId: z.string().min(1) }),
   check_file_link: z.object({ url: z.string().min(1).max(2000) }),
+  open_page: z.object({ path: z.string().regex(PAGE_PATH) }),
   create_flow: z.object({
     name: z.string().trim().min(1).max(100),
     graph: z.object({ nodes: z.array(z.unknown()), edges: z.array(z.unknown()) }),
@@ -485,6 +544,12 @@ async function runTool(
       const r = await api('POST', '/api/instagram/check-file', { url: input.url });
       return r.status === 200 ? ok(r.body, 'Checked a file link') : err(failed(r));
     }
+    case 'open_page': {
+      const input = parse(inputs.open_page);
+      if (!input)
+        return err('That isn’t a page in the app. Use one of the paths in the tool description.');
+      return ok({ opened: input.path }, `Opened ${input.path}`);
+    }
     case 'create_flow': {
       const input = parse(inputs.create_flow);
       if (!input) return badInput;
@@ -585,8 +650,8 @@ async function log(
 }
 
 /**
- * Runs the conversation forward from where it is: calls Claude, runs reading tools, and stops
- * when Claude is done or proposes a change (status "waiting").
+ * Runs the conversation forward from where it is: calls the AI, runs reading tools, and stops
+ * when it's done, proposes a change, or asks a question (status "waiting").
  */
 export async function advance(deps: AssistantDeps, threadId: string) {
   const [thread] = await deps.db
@@ -594,60 +659,40 @@ export async function advance(deps: AssistantDeps, threadId: string) {
     .from(assistantThreads)
     .where(eq(assistantThreads.id, threadId));
   if (!thread) return;
-  const s = await workspaceAi(deps.db, deps.appSecret, deps.workspaceId);
-  if (!s) {
-    await save(deps.db, threadId, {
-      status: 'error',
-      error: 'Add an Anthropic API key in Settings → AI first.',
-    });
+  const ai = await workspaceAi(deps.db, deps.appSecret, deps.workspaceId);
+  if (!ai) {
+    await save(deps.db, threadId, { status: 'error', error: 'Set up AI in Settings → AI first.' });
     return;
   }
-  const client = aiClient(s.apiKey);
-  const messages = thread.messages as Message[];
+  const messages = thread.messages as StoredMessage[];
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
-      const response = await client.beta.messages.create({
-        model: s.model.id,
-        max_tokens: 16000,
-        system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-        tools: TOOLS,
-        messages,
-        output_config: { effort: s.effort },
-        // Caches the growing conversation too, so each step only pays for what's new.
-        cache_control: { type: 'ephemeral' },
-        // A declined request is retried on a suitable model by the API itself (not on Haiku).
-        ...(s.model.fallbacks
-          ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
-          : {}),
-      });
+      const r = await chatStep(ai, { system: SYSTEM_PROMPT, tools: TOOLS, messages });
       await recordUsage(
         deps.db,
         { workspaceId: deps.workspaceId, userId: deps.userId, threadId },
-        response,
+        r.usage,
       );
-      // The whole content goes back as-is (thinking and fallback blocks included).
-      messages.push({ role: 'assistant', content: response.content });
+      messages.push({ role: 'assistant', content: r.content });
       await save(deps.db, threadId, { messages });
 
-      if (response.stop_reason === 'refusal') {
+      if (r.stop === 'refusal') {
         await save(deps.db, threadId, {
           status: 'error',
-          error: 'Claude declined to help with that. Try asking differently.',
+          error: 'The AI declined to help with that. Try asking differently.',
         });
         return;
       }
-      if (response.stop_reason === 'pause_turn') continue;
-      const uses = response.content.filter(
-        (b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use',
-      );
+      if (r.stop === 'pause') continue;
+      const uses = r.content.filter(isToolUse);
       if (uses.length === 0) break;
-      if (response.stop_reason === 'max_tokens') {
+      if (r.stop === 'max_tokens') {
         // A cut-off tool call may parse as a partial input: never run it.
         messages.push({
           role: 'user',
           content: uses.map((u) => ({
-            type: 'tool_result' as const,
+            type: 'tool_result',
             tool_use_id: u.id,
             is_error: true,
             content:
@@ -657,8 +702,8 @@ export async function advance(deps: AssistantDeps, threadId: string) {
         continue;
       }
 
-      const reading = uses.filter((u) => !CHANGING_TOOLS.has(u.name));
-      const changing = uses.filter((u) => CHANGING_TOOLS.has(u.name));
+      const reading = uses.filter((u) => !waitsForPerson(u.name));
+      const waiting = uses.filter((u) => waitsForPerson(u.name));
       const results: ToolResult[] = await Promise.all(
         reading.map(async (u) => {
           const r = await runTool(deps.api, u.name, u.input);
@@ -671,12 +716,12 @@ export async function advance(deps: AssistantDeps, threadId: string) {
           };
         }),
       );
-      if (changing.length > 0) {
+      if (waiting.length > 0) {
         const pending: AssistantPending = {
-          calls: changing.map((u) => ({ id: u.id, name: u.name, input: u.input })),
+          calls: waiting.map((u) => ({ id: u.id, name: u.name, input: u.input })),
           results: results.map((r) => ({
             tool_use_id: r.tool_use_id,
-            content: String(r.content),
+            content: r.content,
             is_error: r.is_error,
           })),
         };
@@ -693,8 +738,16 @@ export async function advance(deps: AssistantDeps, threadId: string) {
   }
 }
 
-/** The person approved or declined the proposed changes: apply the approved ones, carry on. */
-export async function decide(deps: AssistantDeps, threadId: string, approved: Set<string>) {
+/**
+ * The person decided: apply the approved changes, pass on their answers to questions, and
+ * carry on.
+ */
+export async function decide(
+  deps: AssistantDeps,
+  threadId: string,
+  approved: Set<string>,
+  answers: Record<string, string> = {},
+) {
   const [thread] = await deps.db
     .select()
     .from(assistantThreads)
@@ -707,7 +760,16 @@ export async function decide(deps: AssistantDeps, threadId: string, approved: Se
     is_error: r.is_error,
   }));
   for (const call of thread.pending.calls) {
-    if (approved.has(call.id)) {
+    if (call.name === ASK_TOOL) {
+      const answer = answers[call.id]?.trim();
+      results.push({
+        type: 'tool_result',
+        tool_use_id: call.id,
+        content: answer
+          ? `${ANSWERED}${answer}`
+          : `${SKIPPED} Carry on with a sensible default, or ask differently.`,
+      });
+    } else if (approved.has(call.id)) {
       const r = await runTool(deps.api, call.name, call.input);
       await log(deps, threadId, call.name, call.input, 'approved', r);
       results.push({
@@ -724,12 +786,20 @@ export async function decide(deps: AssistantDeps, threadId: string, approved: Se
       results.push({
         type: 'tool_result',
         tool_use_id: call.id,
-        content:
-          'The person declined this change, so nothing was saved. Ask what they’d like instead.',
+        content: DECLINED,
       });
     }
   }
-  const messages = [...(thread.messages as Message[]), { role: 'user' as const, content: results }];
+  const messages: StoredMessage[] = [
+    ...(thread.messages as StoredMessage[]),
+    { role: 'user', content: results },
+  ];
   await save(deps.db, threadId, { messages, pending: null, status: 'working', error: null });
   await advance(deps, threadId);
 }
+
+/** How tool results for questions and declined changes start (the panel reads them back). */
+export const ANSWERED = 'They answered: ';
+export const SKIPPED = 'They skipped this question.';
+export const DECLINED =
+  'The person declined this change, so nothing was saved. Ask what they’d like instead.';

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { layOut } from './ai/assistant';
 import { setAiClient } from './ai/client';
+import { setOpenAiFetch } from './ai/openai';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createDb, runMigrations } from './db/client';
@@ -158,10 +159,15 @@ describe.skipIf(!databaseUrl)('assistant', () => {
 
   it('reads on its own, waits for a yes before building, and keeps the conversation intact', async () => {
     expect(
-      (await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' })).body,
+      (
+        await call('PUT', '/api/settings/ai', {
+          anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+        })
+      ).body,
     ).toMatchObject({
-      hasKey: true,
-      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      ready: true,
+      anthropic: { hasKey: true, keyHint: '…ghij', model: 'claude-opus-5-5' },
       effort: 'medium',
     });
     const thread = (await call<View>('POST', '/api/assistant/threads')).body;
@@ -190,7 +196,7 @@ describe.skipIf(!databaseUrl)('assistant', () => {
     expect(sent.status).toBe(202);
     const waiting = await settled(thread.id);
     expect(waiting.status).toBe('waiting');
-    expect(keys).toEqual(['sk-ant-test-0123456789abcdefghij']);
+    expect(new Set(keys)).toEqual(new Set(['sk-ant-test-0123456789abcdefghij']));
     const proposal = waiting.items.find((i) => i.label === 'Create the flow “Guide”');
     expect(proposal).toMatchObject({
       state: 'waiting',
@@ -256,8 +262,7 @@ describe.skipIf(!databaseUrl)('assistant', () => {
 
   it('tells Claude when a change is declined, and saves nothing', async () => {
     await call('PUT', '/api/settings/ai', {
-      apiKey: 'sk-ant-test-0123456789abcdefghij',
-      model: 'claude-haiku-5-5',
+      anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij', model: 'claude-haiku-5-5' },
     });
     const flow = (await call<{ flow: { id: string } }>('POST', '/api/flows', { name: 'Existing' }))
       .body.flow;
@@ -283,7 +288,9 @@ describe.skipIf(!databaseUrl)('assistant', () => {
   });
 
   it('drafts an inbox reply from the conversation', async () => {
-    await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+    await call('PUT', '/api/settings/ai', {
+      anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+    });
     const [ws] = (await db.execute<{ id: string }>(sql`select id from workspaces limit 1`)).rows;
     const { contactId } = await receive(
       { db, channels: defaultChannels() },
@@ -304,7 +311,9 @@ describe.skipIf(!databaseUrl)('assistant', () => {
   });
 
   it('runs an AI step in a flow: replies, collects a field, and leaves through "done"', async () => {
-    await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+    await call('PUT', '/api/settings/ai', {
+      anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+    });
     const flowId = (await call<{ flow: { id: string } }>('POST', '/api/flows', { name: 'Booking' }))
       .body.flow.id;
     const saved = await call<{ issues: unknown[] }>('PUT', `/api/flows/${flowId}/draft`, {
@@ -375,7 +384,9 @@ describe.skipIf(!databaseUrl)('assistant', () => {
   });
 
   it('sends an AI step’s first reply as the private reply when a comment started the flow', async () => {
-    await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+    await call('PUT', '/api/settings/ai', {
+      anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+    });
     const flowId = (await call<{ flow: { id: string } }>('POST', '/api/flows', { name: 'Ask' }))
       .body.flow.id;
     await call('PUT', `/api/flows/${flowId}/draft`, {
@@ -453,7 +464,9 @@ describe.skipIf(!databaseUrl)('assistant', () => {
       );
 
     it('sorts the comment that started a flow, answers in the private reply, and saves the pick', async () => {
-      await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+      await call('PUT', '/api/settings/ai', {
+        anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+      });
       const flowId = await sortFlow();
       await call('POST', `/api/flows/${flowId}/publish`, {});
       await call('POST', '/api/triggers', { flowId, config: { type: 'comment' } });
@@ -483,7 +496,9 @@ describe.skipIf(!databaseUrl)('assistant', () => {
       expect(said(sim)).toEqual(['Tell me more?']);
       expect(requests).toEqual([]);
 
-      await call('PUT', '/api/settings/ai', { apiKey: 'sk-ant-test-0123456789abcdefghij' });
+      await call('PUT', '/api/settings/ai', {
+        anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+      });
       await call('POST', `/api/flows/${flowId}/publish`, {});
       await call('POST', '/api/triggers', { flowId, config: { type: 'default_reply' } });
       script = [reply([{ type: 'text', text: JSON.stringify({ intent: 'none' }) }])];
@@ -497,5 +512,247 @@ describe.skipIf(!databaseUrl)('assistant', () => {
     const thread = (await call<View>('POST', '/api/assistant/threads')).body;
     const res = await call('POST', `/api/assistant/threads/${thread.id}/messages`, { text: 'Hi' });
     expect(res.status).toBe(409);
+  });
+
+  it('asks one question at a time, takes a typed answer, and opens pages', async () => {
+    await call('PUT', '/api/settings/ai', {
+      anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+    });
+    const thread = (await call<View>('POST', '/api/assistant/threads')).body;
+    script = [
+      reply(
+        [
+          { type: 'text', text: 'Here’s the plan: 1. the guide link, 2. the keyword, 3. done.' },
+          {
+            type: 'tool_use',
+            id: 'tu_q',
+            name: 'ask_user',
+            input: {
+              question: 'What’s the link to your guide?',
+              help: 'A direct PDF arrives as a document.',
+              kind: 'url',
+              step: 1,
+              steps: 3,
+            },
+          },
+        ],
+        'tool_use',
+      ),
+      reply(
+        [
+          { type: 'tool_use', id: 'tu_p', name: 'open_page', input: { path: '/flows' } },
+          { type: 'tool_use', id: 'tu_x', name: 'open_page', input: { path: '/admin/secret' } },
+        ],
+        'tool_use',
+      ),
+      reply([{ type: 'text', text: 'That’s a PDF, so it arrives as a document.' }]),
+    ];
+    await call('POST', `/api/assistant/threads/${thread.id}/messages`, { text: 'Build a flow' });
+    const asking = await settled(thread.id);
+    expect(asking.status).toBe('waiting');
+    expect(asking.items.find((i) => i.type === 'ask')).toMatchObject({
+      question: 'What’s the link to your guide?',
+      kind: 'url',
+      step: 1,
+      steps: 3,
+      state: 'waiting',
+    });
+
+    // Typing in the box answers the question.
+    const answered = await call('POST', `/api/assistant/threads/${thread.id}/messages`, {
+      text: 'https://example.com/guide.pdf',
+    });
+    expect(answered.status).toBe(202);
+    const done = await settled(thread.id);
+    expect(done.status).toBe('idle');
+    expect(done.items.find((i) => i.type === 'ask')).toMatchObject({
+      state: 'answered',
+      answer: 'https://example.com/guide.pdf',
+    });
+    expect(done.items.find((i) => i.id === 'tu_p')).toMatchObject({
+      label: 'Opened Flows',
+      navigate: '/flows',
+      state: 'done',
+    });
+    // Only the app's own pages.
+    expect(done.items.find((i) => i.id === 'tu_x')).toMatchObject({ state: 'failed' });
+    expect(done.items.find((i) => i.id === 'tu_x')).not.toHaveProperty('navigate');
+    expect(JSON.stringify(requests[1])).toContain('They answered: https://example.com/guide.pdf');
+  });
+
+  describe('on OpenAI', () => {
+    let openaiCalls: { method: string; path: string; body: Record<string, unknown> }[] = [];
+    let openaiScript: { status?: number; body: unknown }[] = [];
+    const MODELS = [
+      { id: 'gpt-6-astra', created: 1_790_000_000 },
+      { id: 'gpt-5.6-luna', created: 1_795_000_000 },
+      { id: 'gpt-6-astra-2026-09-01', created: 1_795_000_000 },
+      { id: 'text-embedding-3-large', created: 1_795_000_000 },
+      { id: 'gpt-realtime', created: 1_795_000_000 },
+      { id: 'gpt-4-turbo', created: 1_700_000_000 },
+    ];
+    const usage = {
+      input_tokens: 1000,
+      output_tokens: 50,
+      input_tokens_details: { cached_tokens: 800 },
+    };
+    const said = (text: string) => ({
+      model: 'gpt-6-astra',
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          id: 'msg_1',
+          role: 'assistant',
+          content: [{ type: 'output_text', text }],
+        },
+      ],
+      usage,
+    });
+
+    beforeAll(() => {
+      setOpenAiFetch((async (url: string | URL | Request, init?: RequestInit) => {
+        const path = String(url).replace('https://api.openai.com/v1', '');
+        openaiCalls.push({
+          method: init?.method ?? 'GET',
+          path,
+          body: init?.body ? JSON.parse(String(init.body)) : {},
+        });
+        if (path === '/models')
+          return new Response(JSON.stringify({ object: 'list', data: MODELS }), { status: 200 });
+        const next = openaiScript.shift();
+        if (!next) throw new Error('the OpenAI script ran out');
+        return new Response(JSON.stringify(next.body), { status: next.status ?? 200 });
+      }) as typeof fetch);
+    });
+    beforeEach(() => {
+      openaiCalls = [];
+      openaiScript = [];
+    });
+
+    it('picks a model from the live list, and keeps both keys', async () => {
+      await call('PUT', '/api/settings/ai', {
+        anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' },
+      });
+      const saved = await call('PUT', '/api/settings/ai', {
+        provider: 'openai',
+        openai: { apiKey: 'sk-proj-test-0123456789abcdefghij' },
+      });
+      expect(saved.body).toMatchObject({
+        provider: 'openai',
+        ready: true,
+        anthropic: { hasKey: true },
+        openai: { hasKey: true, keyHint: '…ghij', model: 'gpt-6-astra' },
+      });
+      const listed = await call<{ models: { id: string }[]; suggested: string }>(
+        'GET',
+        '/api/settings/ai/models?provider=openai',
+      );
+      expect(listed.body.models.map((m) => m.id)).toEqual(['gpt-5.6-luna', 'gpt-6-astra']);
+      expect(listed.body.suggested).toBe('gpt-6-astra');
+      const shown = await call('POST', '/api/settings/ai/reveal', { provider: 'openai' });
+      expect(shown.body).toEqual({ value: 'sk-proj-test-0123456789abcdefghij' });
+    });
+
+    it('runs the assistant, carrying its reasoning back, and the AI steps', async () => {
+      await call('PUT', '/api/settings/ai', {
+        provider: 'openai',
+        openai: { apiKey: 'sk-proj-test-0123456789abcdefghij', model: 'gpt-6-astra' },
+      });
+      const thread = (await call<View>('POST', '/api/assistant/threads')).body;
+      openaiScript = [
+        {
+          body: {
+            model: 'gpt-6-astra',
+            status: 'completed',
+            output: [
+              { type: 'reasoning', id: 'rs_1', encrypted_content: 'enc', summary: [] },
+              {
+                type: 'function_call',
+                id: 'fc_1',
+                call_id: 'call_1',
+                name: 'list_flows',
+                arguments: '{}',
+              },
+            ],
+            usage,
+          },
+        },
+        { body: said('You have no flows yet.') },
+      ];
+      await call('POST', `/api/assistant/threads/${thread.id}/messages`, { text: 'Any flows?' });
+      const v = await settled(thread.id);
+      expect(v.status).toBe('idle');
+      expect(v.items.map((i) => i.text ?? i.label)).toEqual([
+        'Any flows?',
+        'Looked at your flows',
+        'You have no flows yet.',
+      ]);
+      const second = openaiCalls.filter((c) => c.path === '/responses')[1]?.body ?? {};
+      expect(second).toMatchObject({
+        model: 'gpt-6-astra',
+        store: false,
+        reasoning: { effort: 'medium' },
+      });
+      const input = second.input as { type?: string; role?: string; call_id?: string }[];
+      expect(input.map((i) => i.type ?? i.role)).toEqual([
+        'user',
+        'reasoning',
+        'function_call',
+        'function_call_output',
+      ]);
+      expect((second.tools as { type: string }[]).every((t) => t.type === 'function')).toBe(true);
+      const [used] = await db.select().from(aiUsage).limit(1);
+      expect(used).toMatchObject({ model: 'gpt-6-astra', inputTokens: 200, cacheReadTokens: 800 });
+
+      // An AI sort step, on a model that turns out not to take reasoning settings.
+      const flowId = (await call<{ flow: { id: string } }>('POST', '/api/flows', { name: 'Sort' }))
+        .body.flow.id;
+      await call('PUT', `/api/flows/${flowId}/draft`, {
+        graph: {
+          nodes: [
+            { id: 'start', type: 'start' },
+            {
+              id: 'sort',
+              type: 'ai_route',
+              data: { intents: [{ id: 'pricing', label: 'Pricing' }] },
+            },
+            {
+              id: 'prices',
+              type: 'message',
+              data: { parts: [{ type: 'text', text: 'Classes are $40.' }] },
+            },
+          ],
+          edges: [
+            { id: 'e1', source: 'start', sourceHandle: 'next', target: 'sort' },
+            { id: 'e2', source: 'sort', sourceHandle: 'pricing', target: 'prices' },
+          ],
+        },
+      });
+      await call('POST', `/api/flows/${flowId}/publish`, {});
+      await call('POST', '/api/triggers', { flowId, config: { type: 'default_reply' } });
+      openaiCalls = [];
+      openaiScript = [
+        {
+          status: 400,
+          body: { error: { message: "Unsupported parameter: 'reasoning.effort'." } },
+        },
+        { body: said('{"intent":"pricing"}') },
+      ];
+      const sim = (
+        await call<{ messages: { direction: string; content: { message?: unknown } }[] }>(
+          'POST',
+          '/api/simulator/send',
+          { text: 'how much?' },
+        )
+      ).body;
+      expect(JSON.stringify(sim.messages.at(-1)?.content)).toContain('Classes are $40.');
+      const [refused, retried] = openaiCalls.map((c) => c.body);
+      expect(refused).toMatchObject({
+        reasoning: { effort: 'low' },
+        text: { format: { type: 'json_schema', strict: true } },
+      });
+      expect(retried).not.toHaveProperty('reasoning');
+    });
   });
 });

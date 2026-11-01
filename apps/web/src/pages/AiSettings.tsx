@@ -1,8 +1,18 @@
 import { type FormEvent, useState } from 'react';
-import { type AiSettings, type AiUsage, ApiError, api, type Me, useApi } from '../api';
-import { Field, FormError, Select, timeAgo } from '../ui';
+import {
+  type AiModelList,
+  type AiProvider,
+  type AiSettings,
+  type AiUsage,
+  ApiError,
+  api,
+  type Me,
+  useApi,
+} from '../api';
+import { FormError, SecretField, Select, timeAgo } from '../ui';
 
-// Settings → AI: bring your own Anthropic key, pick the model, see what it has used and done.
+// Settings → AI: bring your own key from Anthropic or OpenAI (save both, pick the one in use),
+// the model from the provider's live list, and what the AI has used and done.
 
 const EFFORT_HELP: Record<string, string> = {
   low: 'Quick answers, fewest tokens.',
@@ -10,48 +20,51 @@ const EFFORT_HELP: Record<string, string> = {
   high: 'Thinks harder; best for building bigger flows. Uses more tokens.',
 };
 
+const PROVIDER_INFO: Record<
+  AiProvider,
+  { name: string; keyPlaceholder: string; console: string; consoleUrl: string }
+> = {
+  anthropic: {
+    name: 'Anthropic (Claude)',
+    keyPlaceholder: 'sk-ant-…',
+    console: 'console.anthropic.com',
+    consoleUrl: 'https://console.anthropic.com/settings/keys',
+  },
+  openai: {
+    name: 'OpenAI',
+    keyPlaceholder: 'sk-…',
+    console: 'platform.openai.com',
+    consoleUrl: 'https://platform.openai.com/api-keys',
+  },
+};
+
 const dollars = (n: number) => (n < 0.01 ? (n > 0 ? '< $0.01' : '$0.00') : `$${n.toFixed(2)}`);
 const thousands = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n.toLocaleString());
+const errorText = (err: unknown, fallback: string) =>
+  err instanceof ApiError
+    ? (Object.values(err.fieldErrors())[0] ?? (err.code.includes(' ') ? err.code : fallback))
+    : fallback;
 
 export function AiSection({ me }: { me: Me }) {
   const settings = useApi<AiSettings>('/settings/ai');
   const usage = useApi<AiUsage>('/settings/ai/usage');
   const role = me.workspaces[0]?.role;
   const canEdit = role === 'owner' || role === 'admin';
-  const [message, setMessage] = useState<{ ok: boolean; text: string }>();
-  const [busy, setBusy] = useState(false);
-
-  async function save(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const apiKey = String(form.get('apiKey') ?? '').trim();
-    setBusy(true);
-    setMessage(undefined);
-    try {
-      settings.setData(
-        await api<AiSettings>(
-          '/settings/ai',
-          { model: form.get('model'), effort: form.get('effort'), ...(apiKey && { apiKey }) },
-          'PUT',
-        ),
-      );
-      (e.target as HTMLFormElement).reset();
-      setMessage({ ok: true, text: 'Saved.' });
-    } catch (err) {
-      setMessage({
-        ok: false,
-        text:
-          err instanceof ApiError
-            ? (Object.values(err.fieldErrors())[0] ?? 'Couldn’t save.')
-            : 'Couldn’t save.',
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
+  const [switchError, setSwitchError] = useState<string>();
 
   const s = settings.data;
-  const total = usage.data?.models.reduce((sum, m) => sum + m.estimatedCost, 0) ?? 0;
+  const known = usage.data?.models.filter((m) => m.estimatedCost !== null) ?? [];
+  const unknown = usage.data?.models.filter((m) => m.estimatedCost === null) ?? [];
+  const total = known.reduce((sum, m) => sum + (m.estimatedCost ?? 0), 0);
+
+  async function choose(change: { provider?: AiProvider; effort?: string }) {
+    setSwitchError(undefined);
+    try {
+      settings.setData(await api<AiSettings>('/settings/ai', change, 'PUT'));
+    } catch (err) {
+      setSwitchError(errorText(err, 'Couldn’t save.'));
+    }
+  }
 
   return (
     <section aria-labelledby="ai-h" className="grid gap-4">
@@ -60,39 +73,54 @@ export function AiSection({ me }: { me: Me }) {
           AI
         </h2>
         <p className="mt-1 text-[15px] text-muted">
-          The assistant (✨ in the menu) answers questions about your setup, explains why someone
-          didn’t get a reply, and builds flows, asking before it changes anything. It runs on Claude
-          with your own Anthropic API key: Anthropic bills that key directly, nothing goes through
-          anyone else. Get a key at{' '}
-          <a
-            href="https://console.anthropic.com/settings/keys"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            console.anthropic.com
-          </a>
-          .
+          The assistant (✨ in the menu), AI steps in flows, and ✨ Suggest in the Inbox run on your
+          own API key from Anthropic or OpenAI. Save one or both and pick the one in use. The
+          provider bills your key directly; nothing goes through anyone else.
         </p>
       </div>
 
       {s && (
-        <form onSubmit={save} className="card card-flat grid gap-3" autoComplete="off">
-          <Field
-            label="Anthropic API key"
-            name="apiKey"
-            type="password"
-            placeholder={s.hasKey ? 'Saved, encrypted. Paste a new one to replace it.' : 'sk-ant-…'}
-            disabled={!canEdit}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Select label="Model" name="model" defaultValue={s.model} disabled={!canEdit}>
-              {s.models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label} · ${m.input} / ${m.output} per million tokens
-                </option>
-              ))}
-            </Select>
-            <Select label="Effort" name="effort" defaultValue={s.effort} disabled={!canEdit}>
+        <>
+          <div className="card card-flat grid gap-3">
+            <fieldset className="grid gap-2">
+              <legend className="mb-1 text-sm font-bold">In use</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {s.providers.map((p) => {
+                  const on = s.provider === p.id;
+                  const ok = s[p.id].hasKey && Boolean(s[p.id].model);
+                  return (
+                    <label
+                      key={p.id}
+                      className={`flex cursor-pointer items-center gap-3 border-2 px-3 py-2.5 ${on ? 'border-edge bg-surface-2' : 'border-line'} ${canEdit ? '' : 'cursor-default'}`}
+                    >
+                      <input
+                        type="radio"
+                        name="provider"
+                        checked={on}
+                        disabled={!canEdit}
+                        onChange={() => void choose({ provider: p.id })}
+                      />
+                      <span className="flex-1 font-bold">{p.label}</span>
+                      <span className={`chip ${ok ? 'chip-success' : ''}`}>
+                        {ok ? 'Ready' : s[p.id].hasKey ? 'Pick a model' : 'No key'}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            {!s.ready && (
+              <p className="text-[14px] font-bold text-danger">
+                {PROVIDER_INFO[s.provider].name} isn’t set up yet, so AI features are off. Add its
+                key below, or switch to the other one.
+              </p>
+            )}
+            <Select
+              label="Effort"
+              value={s.effort}
+              disabled={!canEdit}
+              onChange={(e) => void choose({ effort: e.target.value })}
+            >
               {s.efforts.map((e) => (
                 <option key={e} value={e}>
                   {e[0]?.toUpperCase()}
@@ -100,64 +128,24 @@ export function AiSection({ me }: { me: Me }) {
                 </option>
               ))}
             </Select>
+            <FormError message={switchError} />
           </div>
-          <p className="text-[13px] text-muted">
-            {s.models.map((m) => `${m.label}: ${m.note}`).join(' ')}
-          </p>
-          {canEdit && (
-            <div className="flex flex-wrap gap-2">
-              <button type="submit" className="btn btn-primary" disabled={busy}>
-                Save
-              </button>
-              {s.hasKey && (
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={async () => {
-                    setMessage(undefined);
-                    try {
-                      const r = await api<{ model: string }>('/settings/ai/test', {});
-                      setMessage({ ok: true, text: `The key works with ${r.model}.` });
-                    } catch (err) {
-                      setMessage({
-                        ok: false,
-                        text: err instanceof ApiError ? err.code : 'The test didn’t go through.',
-                      });
-                    }
-                  }}
-                >
-                  Test the key
-                </button>
-              )}
-              {s.hasKey && (
-                <button
-                  type="button"
-                  className="linkbtn text-danger"
-                  onClick={async () => {
-                    if (
-                      !confirm('Remove the API key? The assistant stops working until you add one.')
-                    )
-                      return;
-                    settings.setData(
-                      await api<AiSettings>('/settings/ai', { apiKey: null }, 'PUT'),
-                    );
-                  }}
-                >
-                  Remove key
-                </button>
-              )}
-            </div>
-          )}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            {(['anthropic', 'openai'] as const).map((p) => (
+              <ProviderCard
+                key={p}
+                provider={p}
+                settings={s}
+                canEdit={canEdit}
+                onSaved={settings.setData}
+              />
+            ))}
+          </div>
           {!canEdit && (
             <p className="text-[13px] text-muted">Owners and admins can change these.</p>
           )}
-          {message &&
-            (message.ok ? (
-              <p className="text-[14px] font-bold text-success">{message.text}</p>
-            ) : (
-              <FormError message={message.text} />
-            ))}
-        </form>
+        </>
       )}
 
       {usage.data && (
@@ -165,7 +153,10 @@ export function AiSection({ me }: { me: Me }) {
           <h3 className="font-bold">
             This month: about {dollars(total)}
             <span className="ml-2 text-[13px] font-normal text-muted">
-              estimated from list prices; your Anthropic console has the exact bill
+              estimated from list prices
+              {unknown.length > 0 && ` (not counting ${unknown.map((m) => m.label).join(', ')})`}
+              {'; '}
+              your provider’s console has the exact bill
             </span>
           </h3>
           {usage.data.models.length > 0 && (
@@ -188,7 +179,9 @@ export function AiSection({ me }: { me: Me }) {
                         {thousands(m.input + m.cacheWrite)} / {thousands(m.cacheRead)} /{' '}
                         {thousands(m.output)}
                       </td>
-                      <td className="px-4 py-2 tabular-nums">{dollars(m.estimatedCost)}</td>
+                      <td className="px-4 py-2 tabular-nums">
+                        {m.estimatedCost === null ? '—' : dollars(m.estimatedCost)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -219,5 +212,167 @@ export function AiSection({ me }: { me: Me }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** One provider's key and model. */
+function ProviderCard({
+  provider,
+  settings,
+  canEdit,
+  onSaved,
+}: {
+  provider: AiProvider;
+  settings: AiSettings;
+  canEdit: boolean;
+  onSaved: (s: AiSettings) => void;
+}) {
+  const info = PROVIDER_INFO[provider];
+  const mine = settings[provider];
+  const inUse = settings.provider === provider;
+  // The list comes live from the provider, with the saved key; a new key fetches it again.
+  const models = useApi<AiModelList>(
+    mine.hasKey && canEdit
+      ? `/settings/ai/models?provider=${provider}&key=${encodeURIComponent(mine.keyHint ?? '')}`
+      : null,
+  );
+  const [message, setMessage] = useState<{ ok: boolean; text: string }>();
+  const [busy, setBusy] = useState(false);
+
+  const listed = models.data?.models ?? [];
+  const current = mine.model ?? models.data?.suggested ?? '';
+  const options =
+    current && !listed.some((m) => m.id === current)
+      ? [{ id: current, label: current, created: '', note: undefined }, ...listed]
+      : listed;
+
+  async function save(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const apiKey = String(form.get('apiKey') ?? '').trim();
+    const model = String(form.get('model') ?? '');
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      onSaved(
+        await api<AiSettings>(
+          '/settings/ai',
+          { [provider]: { ...(apiKey && { apiKey }), ...(model && { model }) } },
+          'PUT',
+        ),
+      );
+      setMessage({ ok: true, text: 'Saved.' });
+    } catch (err) {
+      setMessage({ ok: false, text: errorText(err, 'Couldn’t save.') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={save}
+      className={`card card-flat grid content-start gap-3 ${inUse ? '' : 'opacity-90'}`}
+      autoComplete="off"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-bold">{info.name}</h3>
+        {inUse && <span className="chip chip-orange">In use</span>}
+      </div>
+      <SecretField
+        label="API key"
+        name="apiKey"
+        saved={mine.hasKey}
+        savedHint={mine.keyHint}
+        placeholder={info.keyPlaceholder}
+        disabled={!canEdit}
+        hint={mine.hasKey ? 'Saved and encrypted.' : `Create one at ${info.console} (API keys).`}
+        reveal={async () =>
+          (await api<{ value: string }>('/settings/ai/reveal', { provider })).value
+        }
+      />
+      {mine.hasKey ? (
+        <Select
+          // Re-mounts once the live list arrives, so the saved model shows as selected.
+          key={`${listed.length}:${current}`}
+          label="Model"
+          name="model"
+          defaultValue={current}
+          disabled={!canEdit || models.loading}
+          hint={
+            models.error
+              ? errorText(models.error, 'Couldn’t load the models.')
+              : models.loading
+                ? `Loading ${info.name}’s models…`
+                : `Live from ${info.name}, newest first.`
+          }
+        >
+          {options.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+              {m.label !== m.id ? ` (${m.id})` : ''}
+              {m.note ? ` · ${m.note}` : ''}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <p className="text-[13px] text-muted">
+          Save a key to choose from {info.name}’s current models. Get one at{' '}
+          <a href={info.consoleUrl} target="_blank" rel="noopener noreferrer">
+            {info.console}
+          </a>
+          .
+        </p>
+      )}
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            Save
+          </button>
+          {mine.hasKey && (
+            <button
+              type="button"
+              className="btn"
+              onClick={async () => {
+                setMessage(undefined);
+                try {
+                  const r = await api<{ model: string }>('/settings/ai/test', { provider });
+                  setMessage({ ok: true, text: `The key works with ${r.model}.` });
+                } catch (err) {
+                  setMessage({ ok: false, text: errorText(err, 'The test didn’t go through.') });
+                }
+              }}
+            >
+              Test the key
+            </button>
+          )}
+          {mine.hasKey && (
+            <button
+              type="button"
+              className="linkbtn text-danger"
+              onClick={async () => {
+                if (
+                  !confirm(
+                    `Remove the ${info.name} key?${inUse ? ' AI features stop until you add one or switch providers.' : ''}`,
+                  )
+                )
+                  return;
+                onSaved(
+                  await api<AiSettings>('/settings/ai', { [provider]: { apiKey: null } }, 'PUT'),
+                );
+              }}
+            >
+              Remove key
+            </button>
+          )}
+        </div>
+      )}
+      {message &&
+        (message.ok ? (
+          <p className="text-[14px] font-bold text-success">{message.text}</p>
+        ) : (
+          <FormError message={message.text} />
+        ))}
+    </form>
   );
 }

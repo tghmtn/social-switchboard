@@ -40,10 +40,16 @@ export const workspaces = pgTable('workspaces', {
   /** Push notifications: an ntfy topic URL (ntfy.sh or self-hosted), and its token if it has one. */
   notifyUrl: text('notify_url'),
   notifyTokenEnc: text('notify_token_enc'),
-  /** AI, bring your own key: the Claude model, how much effort it spends, and the key (encrypted). */
-  aiModel: text('ai_model'),
+  /**
+   * AI, bring your own key. Both providers' keys (encrypted) and models can be saved; aiProvider
+   * picks the one every AI feature uses. aiModel and aiKeyEnc are Anthropic's.
+   */
+  aiProvider: text('ai_provider').notNull().default('anthropic'),
   aiEffort: text('ai_effort'),
+  aiModel: text('ai_model'),
   aiKeyEnc: text('ai_key_enc'),
+  aiOpenaiModel: text('ai_openai_model'),
+  aiOpenaiKeyEnc: text('ai_openai_key_enc'),
   createdAt: createdAt(),
 });
 

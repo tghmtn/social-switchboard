@@ -1,23 +1,43 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
+  ANSWERED,
   type ApiCall,
+  ASK_TOOL,
   advance,
   CHANGING_TOOLS,
+  DECLINED,
   decide,
   describeGraph,
   describeTrigger,
+  PAGE_PATH,
 } from '../ai/assistant';
-import { AI_MODELS, DEFAULT_EFFORT, EFFORTS, estimateCost, modelFor } from '../ai/models';
+import {
+  aiErrorText,
+  checkModel,
+  type ListedModel,
+  listModels,
+  suggestedModel,
+  workspaceAi,
+} from '../ai/client';
+import {
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_EFFORT,
+  EFFORTS,
+  estimateCost,
+  PROVIDER_LABELS,
+  PROVIDERS,
+  type Provider,
+  priceOf,
+} from '../ai/models';
 import type { RouteDeps } from '../app';
 import { SESSION_COOKIE } from '../auth/sessions';
 import { decryptSecret, encryptSecret } from '../crypto';
-import { aiActions, aiUsage, assistantThreads, flows, workspaces } from '../db/schema';
+import { aiActions, aiUsage, assistantThreads, flows, triggers, workspaces } from '../db/schema';
 import { notFound, requireAdmin, requireWorkspace, who } from './guard';
 
-// The AI settings (bring your own Anthropic key) and the in-app assistant's conversations.
+// The AI settings (bring your own Anthropic or OpenAI key) and the in-app assistant's conversations.
 // A turn runs in the background and the panel checks back, so a long answer can't hit a proxy's
 // request timeout.
 
@@ -43,6 +63,32 @@ const READ_LABELS: Record<string, string> = {
   check_file_link: 'Checked a file link',
 };
 
+const PAGE_NAMES: [RegExp, string][] = [
+  [/^\/flows\/./, 'the flow'],
+  [/^\/flows$/, 'Flows'],
+  [/^\/contacts\/./, 'the contact'],
+  [/^\/contacts$/, 'Contacts'],
+  [/^\/inbox\/./, 'the conversation'],
+  [/^\/inbox$/, 'the Inbox'],
+  [/^\/channels\/instagram$/, 'Instagram setup'],
+  [/^\/channels$/, 'Channels'],
+  [/^\/simulator$/, 'the Simulator'],
+  [/^\/settings$/, 'Settings'],
+];
+const pageName = (path: string) => PAGE_NAMES.find(([re]) => re.test(path))?.[1] ?? 'Today';
+
+/** Model lists, per workspace, provider and key, for ten minutes. */
+const modelCache = new Map<string, { at: number; models: ListedModel[] }>();
+const modelsFor = async (cacheKey: string, provider: Provider, apiKey: string) => {
+  const hit = modelCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.models;
+  const models = await listModels(provider, apiKey);
+  modelCache.set(cacheKey, { at: Date.now(), models });
+  return models;
+};
+
+const modelId = z.string().regex(/^[\w.:-]{1,100}$/, 'That isn’t a model name.');
+
 const CONTEXT = '<context>';
 
 export const assistantRoutes =
@@ -52,88 +98,163 @@ export const assistantRoutes =
 
     // ------------------------------------------------------------ settings
 
-    const aiSettings = async (workspaceId: string) => {
+    const aiRow = async (workspaceId: string) => {
       const [ws] = await db
         .select({
-          model: workspaces.aiModel,
+          provider: workspaces.aiProvider,
           effort: workspaces.aiEffort,
+          model: workspaces.aiModel,
           keyEnc: workspaces.aiKeyEnc,
+          openaiModel: workspaces.aiOpenaiModel,
+          openaiKeyEnc: workspaces.aiOpenaiKeyEnc,
         })
         .from(workspaces)
         .where(eq(workspaces.id, workspaceId));
-      return {
-        model: modelFor(ws?.model).id,
-        effort: ws?.effort ?? DEFAULT_EFFORT,
+      return ws;
+    };
+    const keyOf = (ws: Awaited<ReturnType<typeof aiRow>>, provider: Provider) =>
+      provider === 'openai' ? ws?.openaiKeyEnc : ws?.keyEnc;
+
+    /** Both providers' settings; the last four characters of each key only for admins. */
+    const aiSettings = async (workspaceId: string, admin: boolean) => {
+      const ws = await aiRow(workspaceId);
+      const hint = (enc: string | null | undefined) =>
+        admin && enc ? `…${decryptSecret(config.appSecret, enc).slice(-4)}` : null;
+      const provider: Provider = ws?.provider === 'openai' ? 'openai' : 'anthropic';
+      const anthropic = {
         hasKey: Boolean(ws?.keyEnc),
-        models: AI_MODELS.map(({ id, label, note, input, output }) => ({
-          id,
-          label,
-          note,
-          input,
-          output,
-        })),
+        keyHint: hint(ws?.keyEnc),
+        model: ws?.model ?? DEFAULT_ANTHROPIC_MODEL,
+      };
+      const openai = {
+        hasKey: Boolean(ws?.openaiKeyEnc),
+        keyHint: hint(ws?.openaiKeyEnc),
+        model: ws?.openaiModel ?? null,
+      };
+      return {
+        provider,
+        providers: PROVIDERS.map((id) => ({ id, label: PROVIDER_LABELS[id] })),
+        effort: ws?.effort ?? DEFAULT_EFFORT,
         efforts: EFFORTS,
+        anthropic,
+        openai,
+        /** The chosen provider has a key and a model, so AI features work. */
+        ready: provider === 'openai' ? openai.hasKey && Boolean(openai.model) : anthropic.hasKey,
       };
     };
+    const isAdmin = (role: string) => role === 'owner' || role === 'admin';
 
-    app.get('/settings/ai', async (req) => aiSettings(who(req).workspace.id));
+    app.get('/settings/ai', async (req) => {
+      const { workspace } = who(req);
+      return aiSettings(workspace.id, isAdmin(workspace.role));
+    });
+
+    /** The provider's current models, live from its API with the saved key. */
+    app.get('/settings/ai/models', async (req, reply) => {
+      const { workspace } = requireAdmin(req);
+      const { provider } = z.object({ provider: z.enum(PROVIDERS) }).parse(req.query);
+      const enc = keyOf(await aiRow(workspace.id), provider);
+      if (!enc) return reply.code(409).send({ error: 'Save a key first.' });
+      try {
+        const models = await modelsFor(
+          `${workspace.id}:${provider}:${enc.slice(-24)}`,
+          provider,
+          decryptSecret(config.appSecret, enc),
+        );
+        return { models, suggested: suggestedModel(provider, models) ?? null };
+      } catch (err) {
+        return reply.code(502).send({ error: aiErrorText(err) });
+      }
+    });
 
     app.put('/settings/ai', async (req) => {
       const { workspace } = requireAdmin(req);
+      const providerSettings = (key: z.ZodType<string>) =>
+        z
+          .object({
+            /** A new key, or null to remove it; leave it out to keep the saved one. */
+            apiKey: key.nullable().optional(),
+            model: modelId.optional(),
+          })
+          .optional();
       const body = z
         .object({
-          model: z.enum(AI_MODELS.map((m) => m.id) as [string, ...string[]]).optional(),
+          provider: z.enum(PROVIDERS).optional(),
           effort: z.enum(EFFORTS).optional(),
-          /** A new key, or null to remove it; leave it out to keep the saved one. */
-          apiKey: z
-            .string()
-            .trim()
-            .regex(
-              /^sk-ant-[\w-]{20,}$/,
-              'That doesn’t look like an Anthropic API key (it starts with sk-ant-).',
-            )
-            .nullable()
-            .optional(),
+          anthropic: providerSettings(
+            z
+              .string()
+              .trim()
+              .regex(
+                /^sk-ant-[\w-]{20,}$/,
+                'That doesn’t look like an Anthropic API key (it starts with sk-ant-).',
+              ),
+          ),
+          openai: providerSettings(
+            z
+              .string()
+              .trim()
+              .regex(
+                /^sk-[\w-]{20,}$/,
+                'That doesn’t look like an OpenAI API key (it starts with sk-).',
+              ),
+          ),
         })
         .parse(req.body);
+      const enc = (k: string | null | undefined) =>
+        k === undefined ? undefined : k ? encryptSecret(config.appSecret, k) : null;
+      const anthropicKey = enc(body.anthropic?.apiKey);
+      const openaiKey = enc(body.openai?.apiKey);
+      let openaiModel = body.openai?.model;
+      // A new OpenAI key with no model picked yet: start with a sensible one from its live list.
+      if (body.openai?.apiKey && !openaiModel && !(await aiRow(workspace.id))?.openaiModel) {
+        try {
+          openaiModel = suggestedModel('openai', await listModels('openai', body.openai.apiKey));
+        } catch {}
+      }
       await db
         .update(workspaces)
         .set({
-          ...(body.model ? { aiModel: body.model } : {}),
+          ...(body.provider ? { aiProvider: body.provider } : {}),
           ...(body.effort ? { aiEffort: body.effort } : {}),
-          ...(body.apiKey !== undefined
-            ? { aiKeyEnc: body.apiKey ? encryptSecret(config.appSecret, body.apiKey) : null }
-            : {}),
+          ...(anthropicKey !== undefined ? { aiKeyEnc: anthropicKey } : {}),
+          ...(body.anthropic?.model ? { aiModel: body.anthropic.model } : {}),
+          ...(openaiKey !== undefined ? { aiOpenaiKeyEnc: openaiKey } : {}),
+          ...(openaiModel ? { aiOpenaiModel: openaiModel } : {}),
         })
         .where(eq(workspaces.id, workspace.id));
-      return aiSettings(workspace.id);
+      return aiSettings(workspace.id, true);
     });
 
-    /** Checks the saved key can use the chosen model (a lookup, no tokens spent). */
+    /** Checks a provider's saved key can use its model (a lookup, no tokens spent). */
     app.post('/settings/ai/test', async (req, reply) => {
       const { workspace } = requireAdmin(req);
-      const [ws] = await db
-        .select({ model: workspaces.aiModel, keyEnc: workspaces.aiKeyEnc })
-        .from(workspaces)
-        .where(eq(workspaces.id, workspace.id));
-      if (!ws?.keyEnc) return reply.code(409).send({ error: 'Save an API key first.' });
+      const ws = await aiRow(workspace.id);
+      const { provider } = z
+        .object({ provider: z.enum(PROVIDERS).optional() })
+        .parse(req.body ?? {});
+      const which: Provider = provider ?? (ws?.provider === 'openai' ? 'openai' : 'anthropic');
+      const enc = keyOf(ws, which);
+      const model = which === 'openai' ? ws?.openaiModel : (ws?.model ?? DEFAULT_ANTHROPIC_MODEL);
+      if (!enc || !model)
+        return reply.code(409).send({ error: 'Save a key and pick a model first.' });
       try {
-        const client = new Anthropic({
-          apiKey: decryptSecret(config.appSecret, ws.keyEnc),
-          timeout: 15_000,
-        });
-        const model = await client.models.retrieve(modelFor(ws.model).id);
-        return { ok: true, model: model.display_name };
+        return {
+          ok: true,
+          model: await checkModel(which, decryptSecret(config.appSecret, enc), model),
+        };
       } catch (err) {
-        const message =
-          err instanceof Anthropic.AuthenticationError
-            ? 'Anthropic refused that key.'
-            : err instanceof Anthropic.NotFoundError ||
-                err instanceof Anthropic.PermissionDeniedError
-              ? 'That key works, but can’t use this model. Pick another one.'
-              : 'Couldn’t reach Anthropic. Try again in a moment.';
-        return reply.code(502).send({ error: message });
+        return reply.code(502).send({ error: aiErrorText(err) });
       }
+    });
+
+    /** A saved key, for the eye button (owners and admins). */
+    app.post('/settings/ai/reveal', async (req, reply) => {
+      const { workspace } = requireAdmin(req);
+      const { provider } = z.object({ provider: z.enum(PROVIDERS) }).parse(req.body);
+      const enc = keyOf(await aiRow(workspace.id), provider);
+      if (!enc) return reply.code(404).send({ error: 'No key is saved.' });
+      return { value: decryptSecret(config.appSecret, enc) };
     });
 
     /** What the AI has used (estimated from list prices) and the latest things it did. */
@@ -172,7 +293,7 @@ export const assistantRoutes =
         since,
         models: rows.map((r) => ({
           ...r,
-          label: modelFor(r.model).label,
+          label: priceOf(r.model)?.label ?? r.model,
           estimatedCost: estimateCost(r.model, r),
         })),
         actions,
@@ -217,6 +338,26 @@ export const assistantRoutes =
               flowIds.add(input.flowId);
           }
       const ids = [...flowIds].filter((x) => z.uuid().safeParse(x).success);
+      // Triggers turned on or off, so their cards can say which.
+      const triggerIds = new Set<string>();
+      for (const m of messages)
+        if (Array.isArray(m.content))
+          for (const b of m.content) {
+            const input = b.input as { triggerId?: unknown } | undefined;
+            if (b.type === 'tool_use' && typeof input?.triggerId === 'string')
+              triggerIds.add(input.triggerId);
+          }
+      const tids = [...triggerIds].filter((x) => z.uuid().safeParse(x).success);
+      const triggerText = new Map(
+        tids.length
+          ? (
+              await db
+                .select({ id: triggers.id, config: triggers.config })
+                .from(triggers)
+                .where(and(inArray(triggers.id, tids), eq(triggers.workspaceId, t.workspaceId)))
+            ).map((r) => [r.id, describeTrigger(r.config as Record<string, unknown>)])
+          : [],
+      );
       const names = new Map(
         ids.length
           ? (
@@ -242,9 +383,30 @@ export const assistantRoutes =
             changes: boolean;
             detail: string[];
             error?: string;
+            /** A page the assistant opened beside the chat. */
+            navigate?: string;
+            /** The flow a change was made to, so an open builder can reload it. */
+            flowId?: string;
+          }
+        | {
+            type: 'ask';
+            id: string;
+            question: string;
+            help?: string;
+            kind: string;
+            options: string[];
+            placeholder?: string;
+            step?: number;
+            steps?: number;
+            /** The plan, as short steps. */
+            overview?: string[];
+            state: 'waiting' | 'answered' | 'skipped';
+            answer?: string;
           };
       const items: Item[] = [];
-      const tools = new Map<string, Extract<Item, { type: 'tool' }>>();
+      const tools = new Map<string, Extract<Item, { type: 'tool' | 'ask' }>>();
+      /** The latest plan an ask_user question carried; later questions show it too. */
+      let plan: string[] | undefined;
       const pendingIds = new Set(t.pending?.calls.map((c) => c.id) ?? []);
       for (const m of messages) {
         const blocks: Block[] =
@@ -252,7 +414,36 @@ export const assistantRoutes =
         for (const b of blocks) {
           if (b.type === 'text' && b.text && !b.text.startsWith(CONTEXT))
             items.push({ type: m.role === 'user' ? 'user' : 'assistant', text: b.text });
-          if (b.type === 'tool_use' && b.id && b.name) {
+          if (b.type === 'tool_use' && b.id && b.name === ASK_TOOL) {
+            const input = (b.input ?? {}) as Record<string, unknown>;
+            const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
+            const int = (v: unknown) =>
+              typeof v === 'number' && v > 0 ? Math.round(v) : undefined;
+            if (Array.isArray(input.overview)) {
+              const steps = input.overview
+                .filter((o): o is string => typeof o === 'string' && o.trim() !== '')
+                .slice(0, 8)
+                .map((o) => o.slice(0, 120));
+              if (steps.length) plan = steps;
+            }
+            const item: Extract<Item, { type: 'ask' }> = {
+              type: 'ask',
+              id: b.id,
+              question: str(input.question) ?? 'One question:',
+              help: str(input.help),
+              kind: str(input.kind) ?? 'text',
+              options: Array.isArray(input.options)
+                ? input.options.filter((o): o is string => typeof o === 'string').slice(0, 6)
+                : [],
+              placeholder: str(input.placeholder),
+              step: int(input.step),
+              steps: int(input.steps),
+              overview: plan,
+              state: 'waiting',
+            };
+            tools.set(b.id, item);
+            items.push(item);
+          } else if (b.type === 'tool_use' && b.id && b.name) {
             const input = (b.input ?? {}) as Record<string, unknown>;
             const changes = CHANGING_TOOLS.has(b.name);
             const graph = input.graph as { nodes: unknown[]; edges: unknown[] } | undefined;
@@ -267,7 +458,9 @@ export const assistantRoutes =
                       ? `Turn a trigger ${input.enabled ? 'on' : 'off'}`
                       : b.name === 'publish_flow'
                         ? `Publish ${flowName(input)}`
-                        : (READ_LABELS[b.name] ?? b.name);
+                        : b.name === 'open_page'
+                          ? `Opened ${pageName(String(input.path ?? ''))}`
+                          : (READ_LABELS[b.name] ?? b.name);
             const detail =
               graph && Array.isArray(graph.nodes)
                 ? describeGraph(graph)
@@ -275,9 +468,11 @@ export const assistantRoutes =
                   ? [describeTrigger(input.config as Record<string, unknown>)]
                   : b.name === 'publish_flow'
                     ? ['Its triggers start answering real people.']
-                    : b.name === 'find_contacts' && input.query
-                      ? [`“${String(input.query)}”`]
-                      : [];
+                    : b.name === 'set_trigger_enabled' && triggerText.has(String(input.triggerId))
+                      ? [String(triggerText.get(String(input.triggerId)))]
+                      : b.name === 'find_contacts' && input.query
+                        ? [`“${String(input.query)}”`]
+                        : [];
             const item: Extract<Item, { type: 'tool' }> = {
               type: 'tool',
               id: b.id,
@@ -285,6 +480,12 @@ export const assistantRoutes =
               state: pendingIds.has(b.id) ? 'waiting' : 'running',
               changes,
               detail,
+              ...(b.name === 'open_page' &&
+              typeof input.path === 'string' &&
+              PAGE_PATH.test(input.path)
+                ? { navigate: input.path }
+                : {}),
+              ...(changes && typeof input.flowId === 'string' ? { flowId: input.flowId } : {}),
             };
             tools.set(b.id, item);
             items.push(item);
@@ -294,7 +495,14 @@ export const assistantRoutes =
             const item = tools.get(r.tool_use_id);
             if (!item) continue;
             const text = typeof r.content === 'string' ? r.content : '';
-            if (text.startsWith('The person declined')) item.state = 'declined';
+            if (item.type === 'ask') {
+              if (text.startsWith(ANSWERED)) {
+                item.state = 'answered';
+                item.answer = text.slice(ANSWERED.length);
+              } else item.state = 'skipped';
+              continue;
+            }
+            if (text === DECLINED) item.state = 'declined';
             else if (r.is_error) {
               item.state = 'failed';
               item.error = text.split('\n')[0];
@@ -305,7 +513,7 @@ export const assistantRoutes =
       // Reading tools in a turn that's waiting on approval have run already.
       for (const r of t.pending?.results ?? []) {
         const item = tools.get(r.tool_use_id);
-        if (item) item.state = r.is_error ? 'failed' : 'done';
+        if (item?.type === 'tool') item.state = r.is_error ? 'failed' : 'done';
       }
       return { id: t.id, title: t.title, status: t.status, error: t.error, items };
     };
@@ -391,18 +599,25 @@ export const assistantRoutes =
       const t = await ownThread(user.id, workspace.id, id);
       if (running.has(id) || t.status === 'working')
         return reply.code(409).send({ error: 'Still working on the last message.' });
-      if (t.status === 'waiting')
-        return reply.code(409).send({ error: 'Approve or decline the proposed change first.' });
+      if (t.status === 'waiting') {
+        // Typing while it waits on a question answers the question.
+        const asks = t.pending?.calls.filter((c) => c.name === ASK_TOOL) ?? [];
+        if (!asks[0] || asks.length !== t.pending?.calls.length)
+          return reply.code(409).send({ error: 'Approve or decline the proposed change first.' });
+        await db
+          .update(assistantThreads)
+          .set({ status: 'working', updatedAt: new Date() })
+          .where(eq(assistantThreads.id, id));
+        const answers = { [asks[0].id]: body.text };
+        start(req, id, (deps) => decide(deps, id, new Set(), answers));
+        return reply.code(202).send(await view({ ...t, status: 'working' }));
+      }
       const [ws] = await db
-        .select({
-          name: workspaces.name,
-          timeZone: workspaces.timeZone,
-          keyEnc: workspaces.aiKeyEnc,
-        })
+        .select({ name: workspaces.name, timeZone: workspaces.timeZone })
         .from(workspaces)
         .where(eq(workspaces.id, workspace.id));
-      if (!ws?.keyEnc)
-        return reply.code(409).send({ error: 'Add an Anthropic API key in Settings → AI first.' });
+      if (!ws || !(await workspaceAi(db, config.appSecret, workspace.id)))
+        return reply.code(409).send({ error: 'Set up AI in Settings → AI first.' });
       const first = (t.messages as unknown[]).length === 0;
       const today = new Date().toLocaleDateString('en-CA', { timeZone: ws.timeZone });
       const context = [
@@ -433,11 +648,16 @@ export const assistantRoutes =
       return reply.code(202).send(await view(saved));
     });
 
-    /** Approve or decline the change(s) the assistant proposed. */
+    /** Approve or decline the change(s) the assistant proposed, and answer its questions. */
     app.post('/assistant/threads/:id/decide', async (req, reply) => {
       const { user, workspace } = who(req);
       const { id } = z.object({ id: z.uuid() }).parse(req.params);
-      const { approve } = z.object({ approve: z.array(z.string()).max(20) }).parse(req.body);
+      const { approve, answers } = z
+        .object({
+          approve: z.array(z.string()).max(20).default([]),
+          answers: z.record(z.string(), z.string().max(4000)).default({}),
+        })
+        .parse(req.body);
       const t = await ownThread(user.id, workspace.id, id);
       if (t.status !== 'waiting' || !t.pending || running.has(id))
         return reply.code(409).send({ error: 'Nothing is waiting for a decision.' });
@@ -445,7 +665,7 @@ export const assistantRoutes =
         .update(assistantThreads)
         .set({ status: 'working', updatedAt: new Date() })
         .where(eq(assistantThreads.id, id));
-      start(req, id, (deps) => decide(deps, id, new Set(approve)));
+      start(req, id, (deps) => decide(deps, id, new Set(approve), answers));
       return reply.code(202).send(await view({ ...t, status: 'working' }));
     });
   };

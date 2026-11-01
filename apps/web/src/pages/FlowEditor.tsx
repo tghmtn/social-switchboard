@@ -17,7 +17,15 @@ import {
 import '@xyflow/react/dist/base.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { ApiError, api, type FieldDef, type FlowDetail, type FlowSummary, useApi } from '../api';
+import {
+  ApiError,
+  api,
+  type FieldDef,
+  FLOW_CHANGED,
+  type FlowDetail,
+  type FlowSummary,
+  useApi,
+} from '../api';
 import { Inspector } from '../builder/Inspector';
 import { StepNode, type StepNodeType } from '../builder/StepNode';
 import { ADDABLE, defaultStep, newId, STEP_META } from '../builder/steps';
@@ -59,11 +67,22 @@ function toGraph(nodes: StepNodeType[], edges: Edge[]): FlowGraph {
 export function FlowEditor() {
   const { id = '' } = useParams();
   const detail = useApi<FlowDetail>(`/flows/${id}`);
+  const reload = detail.reload;
+  const [version, setVersion] = useState(0);
+  // The assistant changed this flow: load its new draft into a fresh canvas.
+  useEffect(() => {
+    const changed = (e: Event) => {
+      if ((e as CustomEvent<{ flowId?: string }>).detail?.flowId !== id) return;
+      void reload().then(() => setVersion((v) => v + 1));
+    };
+    window.addEventListener(FLOW_CHANGED, changed);
+    return () => window.removeEventListener(FLOW_CHANGED, changed);
+  }, [id, reload]);
   if (detail.error) return <p className="p-8 font-bold text-danger">Couldn’t load this flow.</p>;
   if (!detail.data) return null;
   return (
     <ReactFlowProvider>
-      <Editor key={id} detail={detail.data} reloadDetail={detail.reload} />
+      <Editor key={`${id}:${version}`} detail={detail.data} reloadDetail={detail.reload} />
     </ReactFlowProvider>
   );
 }

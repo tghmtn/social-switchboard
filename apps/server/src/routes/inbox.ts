@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { aiClient, aiErrorText, recordUsage, workspaceAi } from '../ai/client';
+import { aiErrorText, plainText, recordUsage, workspaceAi } from '../ai/client';
 import type { RouteDeps } from '../app';
 import type { Tx } from '../db/client';
 import {
@@ -421,8 +421,7 @@ export const inboxRoutes =
       const { id } = z.object({ id: z.uuid() }).parse(req.params);
       const c = await contactIn(workspace.id, id);
       const ai = await workspaceAi(db, config.appSecret, workspace.id);
-      if (!ai)
-        return reply.code(409).send({ error: 'Add an Anthropic API key in Settings → AI first.' });
+      if (!ai) return reply.code(409).send({ error: 'Set up AI in Settings → AI first.' });
       const [ws] = await db
         .select({ name: workspaces.name })
         .from(workspaces)
@@ -460,31 +459,15 @@ export const inboxRoutes =
         .map((n) => `- ${String((n.data as { text?: string }).text ?? '')}`)
         .join('\n');
       try {
-        const response = await aiClient(ai.apiKey).beta.messages.create(
-          {
-            model: ai.model.id,
-            max_tokens: 4000,
-            system: SUGGEST_SYSTEM,
-            output_config: { effort: 'low' },
-            ...(ai.model.fallbacks
-              ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
-              : {}),
-            messages: [
-              {
-                role: 'user',
-                content: `The business: ${ws?.name ?? 'this account'}.\n${noteText ? `Team notes about this person:\n${noteText}\n` : ''}\nThe conversation so far, oldest first:\n${transcript}\n\nDraft our next message to ${name}.`,
-              },
-            ],
-          },
+        const { text, usage } = await plainText(ai, {
+          system: SUGGEST_SYSTEM,
+          prompt: `The business: ${ws?.name ?? 'this account'}.\n${noteText ? `Team notes about this person:\n${noteText}\n` : ''}\nThe conversation so far, oldest first:\n${transcript}\n\nDraft our next message to ${name}.`,
+          maxTokens: 4000,
           // Someone is waiting on the button, behind a proxy that gives up at 100 seconds.
-          { timeout: 40_000, maxRetries: 1 },
-        );
-        await recordUsage(db, { workspaceId: workspace.id, userId: user.id }, response);
-        const text = response.content
-          .flatMap((b) => (b.type === 'text' ? [b.text] : []))
-          .join('')
-          .trim();
-        if (response.stop_reason === 'refusal' || !text)
+          timeoutMs: 40_000,
+        });
+        await recordUsage(db, { workspaceId: workspace.id, userId: user.id }, usage);
+        if (!text)
           return reply.code(502).send({ error: 'The AI didn’t suggest anything this time.' });
         return { text };
       } catch (err) {
