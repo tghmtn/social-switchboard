@@ -1,3 +1,4 @@
+import { Eye, EyeSlash } from '@phosphor-icons/react';
 import {
   type InputHTMLAttributes,
   type ReactNode,
@@ -58,6 +59,143 @@ export function Field({
   return (
     <Shell id={inputId} label={label} hint={hint} error={error} className={className}>
       <input id={inputId} className="input" aria-invalid={error ? true : undefined} {...input} />
+    </Shell>
+  );
+}
+
+/**
+ * A secret (an API key, app secret or token). Once saved it shows as dots, with an eye that
+ * fetches and shows the saved value (only when asked) and a Replace button. Before that, or while
+ * replacing, it's a password box with an eye to check what you typed. Only a newly typed value
+ * is submitted, under `name`.
+ */
+export function SecretField({
+  label,
+  name,
+  saved,
+  savedHint,
+  hint,
+  error,
+  placeholder,
+  disabled,
+  reveal,
+}: FieldShell & {
+  name: string;
+  saved: boolean;
+  /** The saved value's last characters, like "…a1B2". */
+  savedHint?: string | null;
+  placeholder?: string;
+  disabled?: boolean;
+  /** Fetches the saved value (owners and admins). */
+  reveal?: () => Promise<string>;
+}) {
+  const id = useId();
+  const [replacing, setReplacing] = useState(false);
+  const [shown, setShown] = useState(false);
+  const [value, setValue] = useState<string>();
+  const [failed, setFailed] = useState<string>();
+  // A fresh save shows the new secret hidden again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset whenever what's saved changes
+  useEffect(() => {
+    setReplacing(false);
+    setShown(false);
+    setValue(undefined);
+    setFailed(undefined);
+  }, [saved, savedHint]);
+
+  const eye = (on: boolean, toggle: () => void) => (
+    <button
+      type="button"
+      className="absolute inset-y-0 right-0 grid w-11 place-items-center text-muted hover:text-ink disabled:opacity-50"
+      aria-label={on ? `Hide ${label}` : `Show ${label}`}
+      aria-pressed={on}
+      disabled={disabled && !saved}
+      onClick={toggle}
+    >
+      {on ? <EyeSlash size={20} aria-hidden /> : <Eye size={20} aria-hidden />}
+    </button>
+  );
+
+  if (saved && !replacing)
+    return (
+      <Shell id={id} label={label} hint={hint} error={error ?? failed}>
+        <div className="flex gap-2">
+          <div className="relative min-w-0 flex-1">
+            <input
+              id={id}
+              className="input pr-11 font-mono text-[14px]"
+              readOnly
+              value={
+                shown && value !== undefined
+                  ? value
+                  : `${'•'.repeat(16)}${savedHint?.replace('…', '') ?? '••••'}`
+              }
+              onFocus={(e) => {
+                if (shown) e.target.select();
+              }}
+            />
+            {reveal &&
+              eye(shown, async () => {
+                if (shown) return setShown(false);
+                if (value === undefined) {
+                  try {
+                    setValue(await reveal());
+                  } catch {
+                    return setFailed('Couldn’t load it. Try again.');
+                  }
+                }
+                setFailed(undefined);
+                setShown(true);
+              })}
+          </div>
+          {!disabled && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setReplacing(true);
+                setShown(false);
+              }}
+            >
+              Replace
+            </button>
+          )}
+        </div>
+      </Shell>
+    );
+
+  return (
+    <Shell id={id} label={label} hint={hint} error={error}>
+      <div className="flex gap-2">
+        <div className="relative min-w-0 flex-1">
+          <input
+            id={id}
+            name={name}
+            type={shown ? 'text' : 'password'}
+            className="input pr-11"
+            placeholder={placeholder}
+            disabled={disabled}
+            autoComplete="off"
+            spellCheck={false}
+            // biome-ignore lint/a11y/noAutofocus: they just asked to type a new one
+            autoFocus={replacing}
+            aria-invalid={error ? true : undefined}
+          />
+          {eye(shown, () => setShown((on) => !on))}
+        </div>
+        {saved && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setReplacing(false);
+              setShown(false);
+            }}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
     </Shell>
   );
 }

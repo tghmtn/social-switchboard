@@ -60,6 +60,14 @@ export const workspaceRoutes =
       return { url, hasToken };
     });
 
+    /** The saved ntfy token, for the eye button (owners and admins). */
+    app.post('/settings/notifications/reveal', async (req, reply) => {
+      const { workspace } = requireAdmin(req);
+      const { tokenEnc } = await notifications(workspace.id);
+      if (!tokenEnc) return reply.code(404).send({ error: 'Nothing is saved.' });
+      return { value: decryptSecret(config.appSecret, tokenEnc) };
+    });
+
     /** Sends a test push, so you can see it arrive (or why it doesn't). */
     app.post('/settings/notifications/test', async (req, reply) => {
       const { workspace } = requireAdmin(req);

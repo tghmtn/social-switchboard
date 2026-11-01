@@ -5,7 +5,7 @@ import { and, eq, inArray, max, sql } from 'drizzle-orm';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { RouteDeps } from '../app';
-import { encryptSecret, signToken, verifyToken } from '../crypto';
+import { decryptSecret, encryptSecret, signToken, verifyToken } from '../crypto';
 import type { Db } from '../db/client';
 import { instagramAccounts, messages, metaApps, webhookEvents } from '../db/schema';
 import { processWebhookEvents } from '../instagram/events';
@@ -457,6 +457,18 @@ export const instagramRoutes =
         })
         .where(eq(metaApps.workspaceId, workspace.id));
       return status(workspace.id);
+    });
+
+    /** A saved app secret, for the eye button (owners and admins). */
+    app.post('/instagram/settings/reveal', async (req, reply) => {
+      const { workspace } = requireAdmin(req);
+      const { field } = z
+        .object({ field: z.enum(['facebookAppSecret', 'instagramAppSecret']) })
+        .parse(req.body);
+      const s = await metaAppFor(db, workspace.id);
+      const enc = field === 'facebookAppSecret' ? s.facebookAppSecretEnc : s.instagramAppSecretEnc;
+      if (!enc) return reply.code(404).send({ error: 'Nothing is saved.' });
+      return { value: decryptSecret(config.appSecret, enc) };
     });
 
     /** Sends the browser to Instagram's login, which comes back to /api/instagram/callback. */

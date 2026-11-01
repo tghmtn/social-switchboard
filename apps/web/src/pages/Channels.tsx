@@ -12,7 +12,7 @@ import { Link, useSearchParams } from 'react-router';
 import { ApiError, api, type Guide, type InstagramSettings, useApi } from '../api';
 import { Icon } from '../components/Icon';
 import { SquareIcon } from '../components/SquareIcons';
-import { Avatar, Field, FormError, PageHeader, timeAgo } from '../ui';
+import { Avatar, Field, FormError, PageHeader, SecretField, timeAgo } from '../ui';
 import { Page } from './Shell';
 
 // Channels: the list, and the Instagram page (its setup at a glance, plus the Connect Instagram
@@ -653,7 +653,8 @@ function AccountIdForm({ onSaved }: { onSaved: () => void }) {
   );
 }
 
-const SAVED = 'Saved. Paste a new one to replace it.';
+const revealSecret = async (field: 'facebookAppSecret' | 'instagramAppSecret') =>
+  (await api<{ value: string }>('/instagram/settings/reveal', { field })).value;
 
 /** Saves what Meta shows on the current step: the app secret, the Login URL, or both. */
 function CredentialsForm({
@@ -707,11 +708,9 @@ function CredentialsForm({
             label="Login URL"
             name="loginUrl"
             inputMode="url"
-            placeholder={
-              s.loginUrl
-                ? `Saved (configuration ${s.configId}). Paste a new one to replace it.`
-                : 'https://www.facebook.com/dialog/oauth?client_id=…&config_id=…'
-            }
+            defaultValue={s.loginUrl ?? ''}
+            placeholder="https://www.facebook.com/dialog/oauth?client_id=…&config_id=…"
+            hint={s.loginUrl ? `Saved (configuration ${s.configId}).` : undefined}
             error={errors.loginUrl}
           />
           {s.loginRedirectMatches === false && (
@@ -723,12 +722,13 @@ function CredentialsForm({
         </>
       )}
       {secret && (
-        <Field
+        <SecretField
           label="Meta app secret"
           name="facebookAppSecret"
-          type="password"
-          placeholder={s.hasFacebookAppSecret ? SAVED : ''}
+          saved={s.hasFacebookAppSecret}
+          hint={s.hasFacebookAppSecret ? 'Saved and encrypted.' : undefined}
           error={errors.facebookAppSecret}
+          reveal={() => revealSecret('facebookAppSecret')}
         />
       )}
       {login && (
@@ -745,15 +745,17 @@ function CredentialsForm({
               label="Instagram app ID"
               name="instagramAppId"
               inputMode="numeric"
-              placeholder={s.instagramAppId ?? 'e.g. 1234567890123456'}
+              defaultValue={s.instagramAppId ?? ''}
+              placeholder="e.g. 1234567890123456"
               error={errors.instagramAppId}
             />
-            <Field
+            <SecretField
               label="Instagram app secret"
               name="instagramAppSecret"
-              type="password"
-              placeholder={s.hasInstagramAppSecret ? SAVED : ''}
+              saved={s.hasInstagramAppSecret}
+              hint={s.hasInstagramAppSecret ? 'Saved and encrypted.' : undefined}
               error={errors.instagramAppSecret}
+              reveal={() => revealSecret('instagramAppSecret')}
             />
           </div>
         </details>

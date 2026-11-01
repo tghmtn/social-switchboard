@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { ApiError, api, type Me, useApi } from '../api';
-import { Field, FormError, Select } from '../ui';
+import { Field, FormError, SecretField, Select } from '../ui';
 
 // Settings sections for owners and admins: who's on the team, and where push notifications go.
 
@@ -236,12 +236,19 @@ export function NotificationsSection({ me }: { me: Me }) {
             disabled={!canEdit}
             hint="Anyone who knows a topic on ntfy.sh can read it, so make the name long and random, or use your own server."
           />
-          <Field
+          <SecretField
             label="Access token (if your topic needs one)"
             name="token"
-            type="password"
-            placeholder={settings.data.hasToken ? 'Saved. Paste a new one to replace it.' : 'tk_…'}
+            saved={settings.data.hasToken}
+            hint={settings.data.hasToken ? 'Saved and encrypted.' : undefined}
+            placeholder="tk_…"
             disabled={!canEdit}
+            reveal={
+              canEdit
+                ? async () =>
+                    (await api<{ value: string }>('/settings/notifications/reveal', {})).value
+                : undefined
+            }
           />
           {canEdit && (
             <div className="flex flex-wrap gap-2">
