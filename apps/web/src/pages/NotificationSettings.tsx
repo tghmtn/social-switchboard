@@ -432,16 +432,23 @@ function MyAlerts({ settings: s, reload }: { settings: Settings; reload: () => P
   }
 
   async function test(to: Channel) {
-    setMessage(undefined);
+    // A test text waits to hear whether it was delivered, which takes a few seconds.
+    setMessage(
+      to === 'sms'
+        ? { ok: true, text: 'Sending, and waiting to hear whether it arrived…' }
+        : undefined,
+    );
     try {
-      await api('/settings/notifications/test', { to });
+      const r = await api<{ note?: string }>('/settings/notifications/test', { to });
       setMessage({
         ok: true,
-        text: {
-          browser: 'Sent. It should pop up in a moment.',
-          email: 'Sent. Check your inbox (and spam, the first time).',
-          sms: 'Sent. It should arrive in a few seconds.',
-        }[to],
+        text:
+          r.note ??
+          {
+            browser: 'Sent. It should pop up in a moment.',
+            email: 'Sent. Check your inbox (and spam, the first time).',
+            sms: 'Sent. It should arrive in a few seconds.',
+          }[to],
       });
     } catch (err) {
       setMessage({ ok: false, text: errorText(err, 'The test didn’t go through.') });

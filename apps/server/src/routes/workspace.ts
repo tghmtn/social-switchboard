@@ -17,6 +17,7 @@ import {
 } from '../db/schema';
 import {
   alertEmail,
+  awaitSmsDelivery,
   DEFAULT_EVENTS,
   inviteEmail,
   NOTICE_INFO,
@@ -440,7 +441,22 @@ export const workspaceRoutes =
           if (!from.sms)
             return reply.code(409).send({ error: 'An admin needs to set up text messages first.' });
           if (!me?.phone) return reply.code(409).send({ error: 'Save your phone number first.' });
-          await sendSms(from.sms, me.phone, `${message.title}: ${message.text}`);
+          // The provider only says whether it arrived a few seconds later: wait to hear.
+          const id = await sendSms(from.sms, me.phone, `${message.title}: ${message.text}`);
+          const outcome = id ? await awaitSmsDelivery(from.sms, id) : { state: 'pending' as const };
+          const name = from.sms.provider === 'telnyx' ? 'Telnyx' : 'Twilio';
+          if (outcome.state === 'failed')
+            return reply
+              .code(502)
+              .send({ error: `${name} couldn’t deliver it: ${outcome.reason}` });
+          return {
+            ok: true,
+            note: {
+              delivered: 'Delivered. It should be on your phone now.',
+              sent: `${name} handed it to your carrier. It should arrive in a moment.`,
+              pending: `${name} accepted it but hasn’t confirmed delivery yet. If it doesn’t arrive, ${name}’s message log says why.`,
+            }[outcome.state],
+          };
         }
       } catch (err) {
         return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });

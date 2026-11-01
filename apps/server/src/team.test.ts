@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createDb, runMigrations } from './db/client';
-import { type Mail, notifier, setMailer, setNotifyHttp } from './notify';
+import { type Mail, notifier, setMailer, setNotifyHttp, setSmsPolling } from './notify';
 import { defaultChannels } from './runtime/channels';
 import { receive } from './runtime/runtime';
 import { setWebPushSender } from './webpush';
@@ -464,6 +464,77 @@ describe.skipIf(!databaseUrl)('team and notifications', () => {
       expect(failed.status).toBe(502);
       expect(failed.body.error).toBe('Telnyx answered 422: The from number isn’t yours.');
     } finally {
+      setNotifyHttp(async (input, init) => {
+        pushes.push({
+          url: String(input),
+          headers: init?.headers as Record<string, string>,
+          body: String(init?.body).startsWith('{')
+            ? JSON.parse(String(init?.body))
+            : Object.fromEntries(new URLSearchParams(String(init?.body))),
+        });
+        return new Response('{}');
+      });
+    }
+  });
+
+  it('waits to hear whether a test text arrived, and says why when it didn’t', async () => {
+    type Test = { status: number; body: { note?: string; error?: string } };
+    const test = async (): Promise<Test> =>
+      call(owner, 'POST', '/api/settings/notifications/test', { to: 'sms' });
+    await call(owner, 'PUT', '/api/settings/notifications/mine', { phone: '+18015551234' });
+    await call(owner, 'PUT', '/api/settings/notifications/sms/telnyx', {
+      apiKey: 'KEY0123456789abcdefghijklmnop',
+      from: '+18015550000',
+    });
+    // The provider takes the text, then reports on it a moment later.
+    let statuses: object[] = [];
+    let asked = 0;
+    setSmsPolling({ every: 5, max: 300 });
+    setNotifyHttp(async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'POST')
+        return Response.json(url.includes('telnyx') ? { data: { id: 'msg-1' } } : { sid: 'SM1' });
+      asked++;
+      return Response.json(statuses[Math.min(asked - 1, statuses.length - 1)] ?? {});
+    });
+    try {
+      statuses = [
+        { data: { to: [{ status: 'queued' }] } },
+        {
+          data: {
+            to: [{ status: 'delivery_failed' }],
+            errors: [{ title: 'Not 10DLC registered', detail: 'The number isn’t on a campaign.' }],
+          },
+        },
+      ];
+      expect(await test()).toMatchObject({
+        status: 502,
+        body: { error: 'Telnyx couldn’t deliver it: The number isn’t on a campaign.' },
+      });
+      expect(asked).toBe(2);
+
+      asked = 0;
+      statuses = [{ data: { to: [{ status: 'delivered' }] } }];
+      expect((await test()).body.note).toBe('Delivered. It should be on your phone now.');
+
+      // No word within the wait: it says so instead of claiming it arrived.
+      asked = 0;
+      statuses = [{ data: { to: [{ status: 'queued' }] } }];
+      expect((await test()).body.note).toMatch(/hasn’t confirmed delivery yet/);
+
+      // Twilio's codes come out in plain words.
+      await call(owner, 'PUT', '/api/settings/notifications/sms/twilio', {
+        accountSid: `AC${'0'.repeat(32)}`,
+        token: 'twilio-auth-token-0123456789',
+        from: '+18015559999',
+      });
+      asked = 0;
+      statuses = [{ status: 'undelivered', error_code: 30034 }];
+      expect((await test()).body.error).toBe(
+        'Twilio couldn’t deliver it: The number isn’t registered for US business texting (10DLC) yet.',
+      );
+    } finally {
+      setSmsPolling({ every: 1500, max: 15_000 });
       setNotifyHttp(async (input, init) => {
         pushes.push({
           url: String(input),

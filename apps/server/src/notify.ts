@@ -140,13 +140,106 @@ export function smsChoice(ws: SmsColumns): SmsProvider | null {
   return ws.smsProvider ?? (ready.twilio ? 'twilio' : ready.telnyx ? 'telnyx' : null);
 }
 
-/** Sends one text through whichever provider is in use. Throws on failure (the test shows why). */
-export function sendSms(sender: SmsSender, to: string, body: string) {
+/**
+ * Sends one text through whichever provider is in use, and returns the provider's id for it.
+ * Throws when the provider refuses it outright (the test shows why).
+ */
+export function sendSms(sender: SmsSender, to: string, body: string): Promise<string | undefined> {
   return sender.provider === 'telnyx' ? sendTelnyx(sender, to, body) : sendTwilio(sender, to, body);
 }
 
+/**
+ * Where a sent text got to. Providers accept a text first and only find out later whether it can
+ * be delivered (an unregistered number, a landline, a carrier's spam filter), so this asks.
+ */
+export type SmsDelivery =
+  | { state: 'pending' | 'sent' | 'delivered' }
+  | { state: 'failed'; reason: string };
+
+/** Twilio's error codes say little on their own; the common ones in plain words. */
+const TWILIO_REASONS: Record<number, string> = {
+  30003: 'The phone is off or out of reach.',
+  30004: 'The person blocked this number.',
+  30005: 'That phone number doesn’t exist.',
+  30006: 'That number is a landline or can’t get texts.',
+  30007: 'The carrier filtered it as spam.',
+  30032: 'The toll-free number isn’t verified yet.',
+  30034: 'The number isn’t registered for US business texting (10DLC) yet.',
+};
+
+export async function smsDelivery(sender: SmsSender, id: string): Promise<SmsDelivery> {
+  if (sender.provider === 'telnyx') {
+    const res = await http(`https://api.telnyx.com/v2/messages/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${sender.apiKey}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const j = (await res.json().catch(() => null)) as {
+      data?: { to?: { status?: string }[]; errors?: { title?: string; detail?: string }[] };
+    } | null;
+    const status = j?.data?.to?.[0]?.status;
+    if (status === 'delivered') return { state: 'delivered' };
+    if (status === 'sending_failed' || status === 'delivery_failed') {
+      const e = j?.data?.errors?.[0];
+      return { state: 'failed', reason: e?.detail || e?.title || status.replace('_', ' ') };
+    }
+    return { state: status === 'sent' || status === 'delivery_unconfirmed' ? 'sent' : 'pending' };
+  }
+  const res = await http(
+    `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sender.accountSid)}/Messages/${encodeURIComponent(id)}.json`,
+    {
+      headers: {
+        authorization: `Basic ${Buffer.from(`${sender.accountSid}:${sender.token}`).toString('base64')}`,
+      },
+      signal: AbortSignal.timeout(8000),
+    },
+  );
+  const j = (await res.json().catch(() => null)) as {
+    status?: string;
+    error_code?: number | null;
+    error_message?: string | null;
+  } | null;
+  if (j?.status === 'delivered') return { state: 'delivered' };
+  if (j?.status === 'failed' || j?.status === 'undelivered') {
+    const code = j.error_code ?? undefined;
+    return {
+      state: 'failed',
+      reason:
+        (code && TWILIO_REASONS[code]) ||
+        j.error_message ||
+        (code ? `Twilio error ${code}.` : 'Twilio couldn’t deliver it.'),
+    };
+  }
+  return { state: j?.status === 'sent' ? 'sent' : 'pending' };
+}
+
+let poll = { every: 1500, max: 15_000 };
+/** Swappable for tests. */
+export function setSmsPolling(timing: { every: number; max: number }) {
+  poll = timing;
+}
+
+/** Asks about a text every second or two until it's delivered or refused, or ~15 seconds pass. */
+export async function awaitSmsDelivery(sender: SmsSender, id: string): Promise<SmsDelivery> {
+  const until = Date.now() + poll.max;
+  let last: SmsDelivery = { state: 'pending' };
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, poll.every));
+    try {
+      last = await smsDelivery(sender, id);
+    } catch {
+      // A hiccup asking; ask again.
+    }
+    if (last.state === 'delivered' || last.state === 'failed') break;
+  }
+  return last;
+}
+
 /** Twilio: `from` is a phone number, or a Messaging Service SID (MG…). */
-async function sendTwilio(twilio: TwilioSettings & { token: string }, to: string, body: string) {
+async function sendTwilio(
+  twilio: TwilioSettings & { token: string },
+  to: string,
+  body: string,
+): Promise<string | undefined> {
   const res = await http(
     `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(twilio.accountSid)}/Messages.json`,
     {
@@ -165,14 +258,18 @@ async function sendTwilio(twilio: TwilioSettings & { token: string }, to: string
       signal: AbortSignal.timeout(10_000),
     },
   );
-  if (!res.ok) {
-    const j = (await res.json().catch(() => null)) as { message?: string } | null;
+  const j = (await res.json().catch(() => null)) as { message?: string; sid?: string } | null;
+  if (!res.ok)
     throw new Error(`Twilio answered ${res.status}${j?.message ? `: ${j.message}` : '.'}`);
-  }
+  return j?.sid;
 }
 
 /** Telnyx's Messaging API: a number on the account, and an API key. */
-async function sendTelnyx(telnyx: TelnyxSettings & { apiKey: string }, to: string, body: string) {
+async function sendTelnyx(
+  telnyx: TelnyxSettings & { apiKey: string },
+  to: string,
+  body: string,
+): Promise<string | undefined> {
   const res = await http('https://api.telnyx.com/v2/messages', {
     method: 'POST',
     headers: {
@@ -182,13 +279,15 @@ async function sendTelnyx(telnyx: TelnyxSettings & { apiKey: string }, to: strin
     body: JSON.stringify({ from: telnyx.from, to, text: body }),
     signal: AbortSignal.timeout(10_000),
   });
+  const j = (await res.json().catch(() => null)) as {
+    data?: { id?: string };
+    errors?: { title?: string; detail?: string }[];
+  } | null;
   if (!res.ok) {
-    const j = (await res.json().catch(() => null)) as {
-      errors?: { title?: string; detail?: string }[];
-    } | null;
     const why = j?.errors?.[0]?.detail || j?.errors?.[0]?.title;
     throw new Error(`Telnyx answered ${res.status}${why ? `: ${why}` : '.'}`);
   }
+  return j?.data?.id;
 }
 
 // ------------------------------------------------------------------ routing
@@ -334,7 +433,9 @@ async function send(deps: Deps, n: Notice) {
     if (ways.includes('sms') && from.sms && r.phone)
       jobs.push({
         to: 'text',
-        job: sendSms(from.sms, r.phone, `${`${title}: ${text}`.slice(0, 280)}\n${link}`),
+        job: sendSms(from.sms, r.phone, `${`${title}: ${text}`.slice(0, 280)}\n${link}`).then(
+          () => {},
+        ),
       });
   }
   const results = await Promise.allSettled(jobs.map((j) => j.job));
