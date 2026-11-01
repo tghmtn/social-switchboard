@@ -144,6 +144,11 @@ export function ContactDetail() {
             <span className="text-[13px] text-muted">Last seen {timeAgo(c.lastSeenAt)}</span>
           </div>
         </div>
+        {data.identities.some((i) => i.channel !== 'simulator') && (
+          <Link to={`/inbox/${c.id}`} className="btn btn-sm">
+            Open in Inbox
+          </Link>
+        )}
       </div>
 
       {c.automationPausedAt && (
