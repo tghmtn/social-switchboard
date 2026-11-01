@@ -466,6 +466,8 @@ export const webhookEvents = pgTable(
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
     processedAt: timestamp('processed_at', { withTimezone: true }),
     attempts: integer('attempts').notNull().default(0),
+    /** When a pass started on it; others leave it alone until that finishes (or looks stuck). */
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
     error: text('error'),
   },
   (t) => [

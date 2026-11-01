@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { contactIdentities, instagramAccounts, webhookEvents } from '../db/schema';
 import { type RuntimeDeps, receive, receiveComment } from '../runtime/runtime';
@@ -36,30 +36,32 @@ type Entry = {
 type Payload = { object?: string; entry?: Entry[] };
 
 const MAX_ATTEMPTS = 5;
+/** A claim older than this is treated as a crashed pass and taken over. */
+const CLAIM_TIMEOUT = 2 * 60_000;
 
 /** Processes stored deliveries oldest first. Safe to call from several places at once. */
 export async function processWebhookEvents(
   deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
   limit = 20,
 ) {
+  // Every delivery (Instagram's echo of our own reply, too) starts a pass, so passes overlap: an
+  // event another pass is still handling is off limits, unless its claim looks stuck (a crash).
+  const free = () =>
+    or(
+      isNull(webhookEvents.claimedAt),
+      lt(webhookEvents.claimedAt, new Date(Date.now() - CLAIM_TIMEOUT)),
+    );
   const pending = await deps.db
     .select()
     .from(webhookEvents)
-    .where(and(isNull(webhookEvents.processedAt), lt(webhookEvents.attempts, MAX_ATTEMPTS)))
+    .where(and(isNull(webhookEvents.processedAt), lt(webhookEvents.attempts, MAX_ATTEMPTS), free()))
     .orderBy(asc(webhookEvents.id))
     .limit(limit);
   for (const ev of pending) {
-    // Claim it, so a second caller doesn't process the same delivery.
     const [claimed] = await deps.db
       .update(webhookEvents)
-      .set({ attempts: sql`${webhookEvents.attempts} + 1` })
-      .where(
-        and(
-          eq(webhookEvents.id, ev.id),
-          eq(webhookEvents.attempts, ev.attempts),
-          isNull(webhookEvents.processedAt),
-        ),
-      )
+      .set({ attempts: sql`${webhookEvents.attempts} + 1`, claimedAt: new Date() })
+      .where(and(eq(webhookEvents.id, ev.id), isNull(webhookEvents.processedAt), free()))
       .returning({ id: webhookEvents.id });
     if (!claimed) continue;
     try {
@@ -71,7 +73,11 @@ export async function processWebhookEvents(
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       deps.runtime.log?.('instagram webhook processing failed', { eventId: ev.id, error });
-      await deps.db.update(webhookEvents).set({ error }).where(eq(webhookEvents.id, ev.id));
+      // Released, so the next pass retries it.
+      await deps.db
+        .update(webhookEvents)
+        .set({ error, claimedAt: null })
+        .where(eq(webhookEvents.id, ev.id));
     }
   }
   return pending.length;

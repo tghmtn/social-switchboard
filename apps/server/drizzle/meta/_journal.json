@@ -57,6 +57,13 @@
       "when": 1793494978758,
       "tag": "0007_pending_unified_token",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793502440501,
+      "tag": "0008_webhook_claims",
+      "breakpoints": true
     }
   ]
 }

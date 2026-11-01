@@ -122,6 +122,8 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
   let targetsEmpty = false;
   let messagesOff = false;
   let setups = 0;
+  /** Sends wait on this, to hold a delivery mid-way. */
+  let hold: Promise<void> = Promise.resolve();
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -173,6 +175,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     if (path === '/me')
       return json({ user_id: IG_ID, username: 'tgtest', account_type: 'MEDIA_CREATOR' });
     if (path.endsWith('/subscribed_apps')) return json({ success: true });
+    if (path.endsWith('/messages')) await hold;
     if (path.endsWith('/messages'))
       return messagesOff
         ? json(
@@ -245,6 +248,7 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     assignedEmpty = false;
     targetsEmpty = false;
     messagesOff = false;
+    hold = Promise.resolve();
     await db.execute(sql`truncate workspaces, users, webhook_events cascade`);
     // Each test signs up a fresh owner; a new LAN address per test keeps under setup's rate limit.
     const res = await app.inject({
@@ -550,6 +554,52 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(await isPdfUrl('https://files.example.test/guide.pdf')).toBe(true);
     expect(await isPdfUrl('https://files.example.test/share/abc')).toBe(false);
     expect(await isPdfUrl('http://files.example.test/guide.pdf')).toBe(false);
+  });
+
+  it('handles a DM once, even when another delivery starts a pass mid-way', async () => {
+    await connect();
+    const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
+      name: 'Hello',
+      starter: 'blank',
+    });
+    await call('PUT', `/api/flows/${body.flow.id}/draft`, {
+      graph: {
+        nodes: [
+          { id: 'start', type: 'start' },
+          { id: 'a', type: 'message', data: { parts: [{ type: 'text', text: 'Hi!' }] } },
+        ],
+        edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'a' }],
+      },
+    });
+    await call('POST', `/api/flows/${body.flow.id}/publish`, {});
+    await call('POST', '/api/triggers', {
+      flowId: body.flow.id,
+      config: { type: 'keyword', keywords: ['hello'], match: 'exact' },
+    });
+    const dm = (message: object, sender = 'fan-igsid') => ({
+      object: 'instagram',
+      entry: [
+        { id: IG_ID, messaging: [{ sender: { id: sender }, recipient: { id: IG_ID }, message }] },
+      ],
+    });
+    calls = [];
+    let release = () => {};
+    hold = new Promise((resolve) => {
+      release = resolve;
+    });
+
+    await webhook(dm({ mid: 'in-1', text: 'hello' }));
+    for (let i = 0; i < 100 && sends().length === 0; i++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    // While the reply is still going out, Instagram's echo of it arrives and starts another pass.
+    await webhook(dm({ mid: 'out-1', text: 'Hi!', is_echo: true }, IG_ID));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    await settled();
+
+    expect(sends()).toHaveLength(1);
+    const inbound = await db.select().from(messages).where(eq(messages.direction, 'in'));
+    expect(inbound).toHaveLength(1);
   });
 
   it('rejects unsigned webhooks', async () => {
