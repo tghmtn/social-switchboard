@@ -232,6 +232,17 @@
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
+    /* iOS paints anything outside the page with the root's color. */
+    background: var(--sb-bg);
+  }
+  /* Installed on iPhone (iOS 26): with the translucent status bar the app can open one status bar
+     short of the screen (WebKit bug 301108), leaving a strip under the tab bar until the first
+     scroll. A page as tall as the whole screen gets the whole screen; the lvh cap keeps a page
+     that already has it from scrolling. */
+  @media (display-mode: standalone) {
+    html {
+      min-height: min(100lvh, calc(100% + env(safe-area-inset-top)));
+    }
   }
   body {
     background: var(--sb-bg);
