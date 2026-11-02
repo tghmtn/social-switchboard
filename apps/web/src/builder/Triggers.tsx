@@ -1,7 +1,7 @@
-import type { TriggerConfig } from '@social-switchboard/flow';
+import { type TriggerConfig, triggerOverlap } from '@social-switchboard/flow';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { ApiError, api, type InstagramMedia, type Trigger } from '../api';
+import { ApiError, api, type InstagramMedia, type Trigger, useApi } from '../api';
 import { Dialog, Field, FormError, Select, TextArea, Toggle } from '../ui';
 
 const MATCH_TEXT = { exact: '', contains: ' (anywhere)', starts_with: ' (starts with)' } as const;
@@ -57,6 +57,86 @@ const splitList = (raw: FormDataEntryValue | null, sep: RegExp) =>
     .map((k) => k.trim())
     .filter(Boolean);
 
+/** A trigger's keywords, with a Change link to edit them in place. */
+function KeywordsRow({
+  id,
+  config,
+  onChange,
+}: {
+  id: string;
+  config: Extract<TriggerConfig, { type: 'keyword' | 'comment' }>;
+  onChange: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string>();
+
+  async function save(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const keywords = splitList(new FormData(e.currentTarget).get('keywords'), /,/);
+    if (config.type === 'keyword' && keywords.length === 0)
+      return setError('Add at least one keyword.');
+    try {
+      await api(`/triggers/${id}`, { config: { ...config, keywords } }, 'PATCH');
+      setEditing(false);
+      setError(undefined);
+      onChange();
+    } catch {
+      setError('Couldn’t save the keywords.');
+    }
+  }
+
+  return (
+    <>
+      <dt className="text-muted">Keywords</dt>
+      <dd className="break-words">
+        {editing ? (
+          <form onSubmit={save} className="grid gap-2">
+            <input
+              name="keywords"
+              className="input"
+              aria-label="Keywords, separated by commas"
+              defaultValue={config.keywords.join(', ')}
+              placeholder={config.type === 'comment' ? 'Empty: any comment' : 'WORKSHOP'}
+              // biome-ignore lint/a11y/noAutofocus: opened by the Change button just pressed
+              autoFocus
+            />
+            <FormError message={error} />
+            <div className="flex gap-2">
+              <button type="submit" className="btn btn-sm btn-primary">
+                Save
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setEditing(false);
+                  setError(undefined);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            {config.keywords.length ? (
+              <>
+                <b>{config.keywords.join(', ')}</b>{' '}
+                <span className="text-muted">({MATCH_LABEL[config.match]})</span>
+              </>
+            ) : (
+              'Any comment'
+            )}{' '}
+            <button type="button" className="linkbtn text-[13px]" onClick={() => setEditing(true)}>
+              Change
+            </button>
+          </>
+        )}
+      </dd>
+    </>
+  );
+}
+
 /** Asked of the post picker: what's picked now, and what to do with the new choice. */
 type PostRequest = { selected: string[]; onDone: (ids: string[]) => void | Promise<void> };
 
@@ -73,6 +153,11 @@ export function TriggersEditor({
   onChange: () => void;
 }) {
   const posts = useRecentPosts();
+  // Live triggers elsewhere, to warn when one here answers the same thing.
+  const all = useApi<{ triggers: Trigger[] }>('/triggers');
+  const others = (all.data?.triggers ?? []).filter(
+    (o) => o.flowId !== flowId && o.enabled && o.flowPublished,
+  );
   const [type, setType] = useState<TriggerConfig['type']>('comment');
   const [error, setError] = useState<string>();
   const [picked, setPicked] = useState<string[]>([]);
@@ -189,19 +274,7 @@ export function TriggersEditor({
                   </>
                 )}
                 {(c.type === 'comment' || c.type === 'keyword') && (
-                  <>
-                    <dt className="text-muted">Keywords</dt>
-                    <dd className="break-words">
-                      {c.keywords.length ? (
-                        <>
-                          <b>{c.keywords.join(', ')}</b>{' '}
-                          <span className="text-muted">({MATCH_LABEL[c.match]})</span>
-                        </>
-                      ) : (
-                        'Any comment'
-                      )}
-                    </dd>
-                  </>
+                  <KeywordsRow id={t.id} config={c} onChange={onChange} />
                 )}
                 {c.type === 'comment' && c.publicReplies.length > 0 && (
                   <>
@@ -220,6 +293,21 @@ export function TriggersEditor({
                   </>
                 )}
               </dl>
+              {t.enabled &&
+                others.flatMap((o) => {
+                  const what = triggerOverlap(t, o);
+                  return what
+                    ? [
+                        <p
+                          key={o.id}
+                          className="border-2 border-accent bg-surface px-3 py-2 text-[13px]"
+                        >
+                          <Link to={`/automations/${o.flowId}`}>{o.flowName}</Link> also answers{' '}
+                          {what}, and only one of them runs. Change one of them, or turn one off.
+                        </p>,
+                      ]
+                    : [];
+                })}
             </div>
           );
         })}

@@ -3,7 +3,13 @@ import { parseInput } from './inputs';
 import { flowGraph } from './schema';
 import { STARTERS } from './starters';
 import { nextTimeOfDay, zonedToUtc } from './time';
-import { keywordMatches, matchCommentTrigger, matchTrigger, type TriggerConfig } from './triggers';
+import {
+  keywordMatches,
+  matchCommentTrigger,
+  matchTrigger,
+  type TriggerConfig,
+  triggerOverlap,
+} from './triggers';
 import { validateFlow } from './validate';
 
 describe('validateFlow', () => {
@@ -133,6 +139,32 @@ describe('comment triggers', () => {
     expect(
       matchTrigger(triggers, { channel: 'instagram', text: 'love this', isNewContact: false }),
     ).toBeUndefined();
+  });
+});
+
+describe('triggerOverlap', () => {
+  const t = (config: TriggerConfig, channels: string[] | null = null) => ({ config, channels });
+  const keyword = (...keywords: string[]) =>
+    t({ type: 'keyword', keywords, match: 'exact' } as const);
+  const comment = (keywords: string[], mediaIds: string[] = []) =>
+    t({ type: 'comment', keywords, match: 'contains', mediaIds, publicReplies: [] });
+
+  it('names what two triggers both answer', () => {
+    expect(triggerOverlap(keyword('GUIDE', 'free'), keyword('Guide!'))).toBe('“GUIDE”');
+    expect(triggerOverlap(keyword('GUIDE'), keyword('WORKSHOP'))).toBeUndefined();
+    expect(triggerOverlap(t({ type: 'welcome' }), t({ type: 'welcome' }))).toBe('first messages');
+    expect(triggerOverlap(t({ type: 'welcome' }), keyword('GUIDE'))).toBeUndefined();
+    expect(triggerOverlap(comment(['guide']), comment(['GUIDE'], ['1']))).toBe(
+      'comments with “guide”',
+    );
+    expect(triggerOverlap(comment([]), comment(['GUIDE']))).toBe('any comment');
+  });
+
+  it('ignores triggers on different posts or channels', () => {
+    expect(triggerOverlap(comment(['GUIDE'], ['1']), comment(['GUIDE'], ['2']))).toBeUndefined();
+    const ig = t({ type: 'welcome' }, ['instagram']);
+    expect(triggerOverlap(ig, t({ type: 'welcome' }, ['webchat']))).toBeUndefined();
+    expect(triggerOverlap(ig, t({ type: 'welcome' }))).toBe('first messages');
   });
 });
 

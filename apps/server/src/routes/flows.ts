@@ -146,6 +146,48 @@ export const flowRoutes =
       return reply.code(201).send({ flow });
     });
 
+    /** Copies the draft and its triggers into a new, unpublished automation. */
+    app.post('/flows/:id/duplicate', async (req, reply) => {
+      const { workspace } = who(req);
+      const { id } = idParam.parse(req.params);
+      const original = await ownFlow(workspace.id, id);
+      const flow = await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(flows)
+          .values({
+            workspaceId: workspace.id,
+            name: `${original.name.slice(0, 93)} (copy)`,
+            draft: original.draft,
+          })
+          .returning();
+        if (!created) throw new Error('flow insert returned no row');
+        const copies = await tx
+          .select()
+          .from(triggers)
+          .where(eq(triggers.flowId, id))
+          .orderBy(triggers.position, triggers.createdAt);
+        if (copies.length > 0) {
+          // After every other trigger, so the original keeps answering until the copy changes.
+          const [last] = await tx
+            .select({ n: max(triggers.position) })
+            .from(triggers)
+            .where(eq(triggers.workspaceId, workspace.id));
+          await tx.insert(triggers).values(
+            copies.map((t, i) => ({
+              workspaceId: workspace.id,
+              flowId: created.id,
+              config: t.config,
+              channels: t.channels,
+              enabled: t.enabled,
+              position: (last?.n ?? 0) + 1 + i,
+            })),
+          );
+        }
+        return created;
+      });
+      return reply.code(201).send({ flow });
+    });
+
     app.get('/flows/:id', async (req) => {
       const { workspace } = who(req);
       const { id } = idParam.parse(req.params);

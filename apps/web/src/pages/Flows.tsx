@@ -18,6 +18,22 @@ export function Automations() {
   const [params, setParams] = useSearchParams();
   const creating = params.get('new') === '1';
   const setCreating = (on: boolean) => setParams(on ? { new: '1' } : {}, { replace: true });
+  const navigate = useNavigate();
+  const [copying, setCopying] = useState<string>();
+  const [copyError, setCopyError] = useState<string>();
+
+  // The copy opens in the builder, ready for its own keywords and name.
+  async function duplicate(id: string) {
+    setCopying(id);
+    setCopyError(undefined);
+    try {
+      const res = await api<{ flow: { id: string } }>(`/flows/${id}/duplicate`, {});
+      navigate(`/automations/${res.flow.id}`);
+    } catch {
+      setCopyError(id);
+      setCopying(undefined);
+    }
+  }
 
   return (
     <Page>
@@ -45,13 +61,17 @@ export function Automations() {
 
       <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
         {data?.flows.map((f) => (
-          <Link
-            key={f.id}
-            to={`/automations/${f.id}`}
-            className="card press grid gap-2 p-4 text-ink no-underline sm:gap-3 sm:p-6"
-          >
+          // The name's link covers the whole card; Duplicate sits above it.
+          <div key={f.id} className="card press relative grid gap-2 p-4 text-ink sm:gap-3 sm:p-6">
             <div className="flex items-start justify-between gap-3">
-              <h2 className="min-w-0 text-[17px] font-bold break-words sm:text-lg">{f.name}</h2>
+              <h2 className="min-w-0 text-[17px] font-bold break-words sm:text-lg">
+                <Link
+                  to={`/automations/${f.id}`}
+                  className="text-ink no-underline after:absolute after:inset-0"
+                >
+                  {f.name}
+                </Link>
+              </h2>
               {f.publishedNumber === null ? (
                 <span className="chip">Draft</span>
               ) : f.hasUnpublishedChanges ? (
@@ -80,8 +100,24 @@ export function Automations() {
                 <dd className="text-lg font-bold tabular-nums">{f.activeRuns}</dd>
               </div>
             </dl>
-            <p className="hidden text-[13px] text-muted sm:block">Edited {timeAgo(f.updatedAt)}</p>
-          </Link>
+            <div className="flex items-center justify-between gap-3">
+              <p className="hidden text-[13px] text-muted sm:block">
+                Edited {timeAgo(f.updatedAt)}
+              </p>
+              <button
+                type="button"
+                className="btn btn-sm relative z-10 ml-auto"
+                disabled={copying !== undefined}
+                aria-label={`Duplicate ${f.name}`}
+                onClick={() => duplicate(f.id)}
+              >
+                {copying === f.id ? 'Duplicating…' : 'Duplicate'}
+              </button>
+            </div>
+            {copyError === f.id && (
+              <FormError message="Couldn’t duplicate this automation. Try again." />
+            )}
+          </div>
         ))}
       </div>
 

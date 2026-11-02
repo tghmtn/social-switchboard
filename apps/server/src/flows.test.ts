@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -12,6 +13,10 @@ import { wakeDue } from './runtime/runtime';
 // End-to-end: real Postgres, real runtime, driven through the HTTP API and the simulator channel.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
+type FlowDetail = {
+  flow: { draft: unknown; publishedVersionId: string | null };
+  triggers: { config: unknown; position: number }[];
+};
 type SimState = {
   contact: {
     id: string;
@@ -36,6 +41,7 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
   const { db, pool } = createDb(config.databaseUrl);
   let app: FastifyInstance;
   let cookies: Record<string, string> = {};
+  let setups = 0;
 
   const call = async <T = unknown>(
     method: InjectOptions['method'],
@@ -75,6 +81,7 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/setup',
+      remoteAddress: `10.0.5.${++setups}`,
       payload: {
         firstName: 'Ada',
         lastName: 'Lovelace',
@@ -302,6 +309,28 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
     s = (await call<SimState>('POST', '/api/simulator/send', { text: 'pricing' })).body;
     // Not a new contact any more and "pricing" isn't a keyword: nothing fires, and that's right.
     expect(outText(s)).toHaveLength(before);
+  });
+
+  it('duplicates an automation as an unpublished copy with its triggers', async () => {
+    const id = await createFlow('Follow first', 'follow_first');
+    await call('POST', `/api/flows/${id}/publish`);
+    const original = (await call<FlowDetail>('GET', `/api/flows/${id}`)).body;
+
+    const made = await call<{ flow: { id: string; name: string } }>(
+      'POST',
+      `/api/flows/${id}/duplicate`,
+      {},
+    );
+    expect(made.status).toBe(201);
+    expect(made.body.flow.name).toBe('Follow first (copy)');
+    const copy = (await call<FlowDetail>('GET', `/api/flows/${made.body.flow.id}`)).body;
+    expect(copy.flow.draft).toEqual(original.flow.draft);
+    expect(copy.flow.publishedVersionId).toBeNull();
+    expect(copy.triggers.map((t) => t.config)).toEqual(original.triggers.map((t) => t.config));
+    // The copies go last, so the original keeps answering its keyword.
+    expect(copy.triggers[0]?.position).toBeGreaterThan(original.triggers[0]?.position ?? 0);
+
+    expect((await call('POST', `/api/flows/${randomUUID()}/duplicate`, {})).status).toBe(404);
   });
 
   it('chains into another flow and picks keyword over default reply', async () => {

@@ -97,6 +97,36 @@ export function matchTrigger<T extends Matchable>(
   );
 }
 
+/**
+ * What two triggers would both answer, if anything, like `“GUIDE”` or `first messages`. Only one
+ * of them runs, so the builder warns (a duplicated automation keeps the original's keywords).
+ */
+export function triggerOverlap(a: Matchable, b: Matchable): string | undefined {
+  if (a.channels?.length && b.channels?.length && !a.channels.some((c) => b.channels?.includes(c)))
+    return undefined;
+  const x = a.config;
+  const y = b.config;
+  if (x.type === 'welcome' && y.type === 'welcome') return 'first messages';
+  if (x.type === 'default_reply' && y.type === 'default_reply')
+    return 'messages nothing else answers';
+  if (x.type === 'ref' && y.type === 'ref') return x.ref === y.ref ? `ref=${x.ref}` : undefined;
+  const words = (k: string[]) => new Set(k.map(normalizeText));
+  if (x.type === 'keyword' && y.type === 'keyword') {
+    const theirs = words(y.keywords);
+    const shared = x.keywords.find((k) => theirs.has(normalizeText(k)));
+    return shared === undefined ? undefined : `“${shared}”`;
+  }
+  if (x.type === 'comment' && y.type === 'comment') {
+    if (x.mediaIds.length && y.mediaIds.length && !x.mediaIds.some((m) => y.mediaIds.includes(m)))
+      return undefined;
+    if (!x.keywords.length || !y.keywords.length) return 'any comment';
+    const theirs = words(y.keywords);
+    const shared = x.keywords.find((k) => theirs.has(normalizeText(k)));
+    return shared === undefined ? undefined : `comments with “${shared}”`;
+  }
+  return undefined;
+}
+
 export type CommentEvent = { channel: string; text: string; mediaId?: string };
 
 /**
