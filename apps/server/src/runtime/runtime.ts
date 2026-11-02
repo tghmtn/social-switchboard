@@ -8,7 +8,7 @@ import {
   matchTrigger,
   type RunState,
 } from '@social-switchboard/flow';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { Db, Tx } from '../db/client';
 import {
   consents,
@@ -263,6 +263,7 @@ export async function receiveComment(deps: RuntimeDeps, input: InboundComment) {
           eq(triggers.workspaceId, input.workspaceId),
           eq(triggers.enabled, true),
           isNull(flows.archivedAt),
+          isNull(flows.disabledAt),
           isNotNull(flows.publishedVersionId),
         ),
       )
@@ -337,8 +338,9 @@ async function route(ctx: Ctx, input: Inbound, isNew: boolean) {
     ) {
       return;
     }
-    // A button on an earlier message: carry on from that button in a fresh run.
-    const version = await loadVersion(ctx.tx, ctx.workspaceId, payload.versionId);
+    // A button on an earlier message: carry on from that button in a fresh run, unless its
+    // automation has since been switched off or deleted.
+    const version = await tappableVersion(ctx.tx, ctx.workspaceId, payload.versionId);
     if (version) {
       await cancelConversationRuns(ctx);
       await begin(ctx, version, {
@@ -368,6 +370,7 @@ async function route(ctx: Ctx, input: Inbound, isNew: boolean) {
         eq(triggers.workspaceId, ctx.workspaceId),
         eq(triggers.enabled, true),
         isNull(flows.archivedAt),
+        isNull(flows.disabledAt),
         isNotNull(flows.publishedVersionId),
       ),
     )
@@ -662,6 +665,26 @@ async function loadVersion(
   return v;
 }
 
+/** A version a tap may carry on in: its automation still on (Test chat's drafts always are). */
+async function tappableVersion(
+  tx: Tx,
+  workspaceId: string,
+  versionId: string,
+): Promise<Version | undefined> {
+  const [v] = await tx
+    .select({ id: flowVersions.id, flowId: flowVersions.flowId, graph: flowVersions.graph })
+    .from(flowVersions)
+    .innerJoin(flows, eq(flows.id, flowVersions.flowId))
+    .where(
+      and(
+        eq(flowVersions.id, versionId),
+        eq(flowVersions.workspaceId, workspaceId),
+        or(eq(flowVersions.kind, 'test'), and(isNull(flows.archivedAt), isNull(flows.disabledAt))),
+      ),
+    );
+  return v;
+}
+
 async function waitingRun(ctx: Ctx, kinds: string[]) {
   const [run] = await ctx.tx
     .select()
@@ -927,7 +950,12 @@ async function persist(
       .select({ versionId: flows.publishedVersionId })
       .from(flows)
       .where(
-        and(eq(flows.id, flowId), eq(flows.workspaceId, workspaceId), isNull(flows.archivedAt)),
+        and(
+          eq(flows.id, flowId),
+          eq(flows.workspaceId, workspaceId),
+          isNull(flows.archivedAt),
+          isNull(flows.disabledAt),
+        ),
       );
     const version = target?.versionId
       ? await loadVersion(tx, workspaceId, target.versionId)
@@ -935,7 +963,7 @@ async function persist(
     if (!version) {
       await recordEvent(tx, workspaceId, contactId, 'flow_failed', {
         flowId,
-        error: 'The automation to go to isn’t published.',
+        error: 'The automation to go to isn’t published, or is switched off.',
       });
       continue;
     }

@@ -33,7 +33,7 @@ import { ADDABLE, defaultStep, newId, STEP_META } from '../builder/steps';
 import { TriggersEditor, triggerText } from '../builder/Triggers';
 import { Icon } from '../components/Icon';
 import { Simulator } from '../components/Simulator';
-import { FormError } from '../ui';
+import { FormError, Toggle } from '../ui';
 
 const nodeTypes = { step: StepNode };
 type SaveState =
@@ -129,6 +129,9 @@ function Editor({
   const published = Boolean(detail.flow.publishedVersionId);
   const latest = detail.versions[0];
   const [unpublished, setUnpublished] = useState(detail.hasUnpublishedChanges);
+  // Switched off: still published, but answering nothing. Publishing switches it back on.
+  const [on, setOn] = useState(!detail.flow.disabledAt);
+  useEffect(() => setOn(!detail.flow.disabledAt), [detail.flow.disabledAt]);
 
   const graph = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
   const graphJson = useMemo(() => JSON.stringify(graph), [graph]);
@@ -280,6 +283,22 @@ function Editor({
     }
   }
 
+  async function switchOn(value: boolean) {
+    setOn(value);
+    setNotice(undefined);
+    try {
+      await api(`/flows/${flowId}`, { on: value }, 'PATCH');
+      setNotice(
+        value
+          ? 'Switched on: it’s answering again.'
+          : 'Switched off: it won’t answer anyone until you switch it back on.',
+      );
+    } catch {
+      setOn(!value);
+      setNotice(`Couldn’t switch it ${value ? 'on' : 'off'}. Try again.`);
+    }
+  }
+
   async function rename() {
     const trimmed = name.trim();
     if (!trimmed || trimmed === detail.flow.name) return setName(detail.flow.name);
@@ -354,13 +373,22 @@ function Editor({
         />
         <span className="order-last flex basis-full items-center gap-2 pl-12 sm:order-none sm:basis-auto sm:pl-0">
           {published ? (
-            unpublished ? (
+            !on ? (
+              <span className="chip">Off</span>
+            ) : unpublished ? (
               <span className="chip chip-orange">Unpublished changes</span>
             ) : (
               <span className="chip chip-success">Live · v{latest?.number}</span>
             )
           ) : (
             <span className="chip">Draft</span>
+          )}
+          {published && (
+            <Toggle
+              on={on}
+              label={on ? 'On, answering. Switch off' : 'Off. Switch on'}
+              onChange={switchOn}
+            />
           )}
           <span className="text-[13px] text-muted" aria-live="polite">
             {save.kind === 'saved' ? 'Saved' : save.kind === 'error' ? '' : 'Saving…'}

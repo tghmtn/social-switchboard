@@ -333,6 +333,68 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
     expect((await call('POST', `/api/flows/${randomUUID()}/duplicate`, {})).status).toBe(404);
   });
 
+  it('switches a live automation off and on, and deletes it', async () => {
+    const id = await createFlow('Guide', 'keyword_reply');
+    await call('POST', `/api/flows/${id}/publish`);
+    await call('POST', '/api/triggers', {
+      flowId: id,
+      config: { type: 'comment', keywords: [], mediaIds: ['p1', 'p2'] },
+    });
+    const list = async () =>
+      (await call<{ flows: { id: string; on: boolean; postIds: string[] }[] }>('GET', '/api/flows'))
+        .body.flows;
+    expect((await list())[0]).toMatchObject({ on: true, postIds: ['p1', 'p2'] });
+
+    expect((await call('PATCH', `/api/flows/${id}`, { on: false })).status).toBe(200);
+    expect((await list())[0]?.on).toBe(false);
+    let s = (await call<SimState>('POST', '/api/simulator/send', { text: 'GUIDE' })).body;
+    expect(outText(s)).toEqual([]); // off: it answers nothing
+
+    await call('PATCH', `/api/flows/${id}`, { on: true });
+    s = (await call<SimState>('POST', '/api/simulator/send', { text: 'GUIDE' })).body;
+    expect(outText(s)).toEqual(['Here’s the guide you asked for 👇']);
+
+    // Publishing puts it live, so it switches back on too.
+    await call('PATCH', `/api/flows/${id}`, { on: false });
+    await call('POST', `/api/flows/${id}/publish`);
+    expect((await list())[0]?.on).toBe(true);
+
+    expect((await call('DELETE', `/api/flows/${id}`)).status).toBe(204);
+    expect(await list()).toEqual([]);
+  });
+
+  it('ignores taps on an automation once it’s switched off or deleted', async () => {
+    const id = await createFlow('Follow first', 'follow_first');
+    await call('POST', `/api/flows/${id}/publish`);
+    let s = (await call<SimState>('POST', '/api/simulator/comment', { text: 'guide please' })).body;
+    const ask = s.messages
+      .map((m) => m.content)
+      .find((c): c is OutboundContent => c.kind === 'out' && Boolean(c.privateReplyTo));
+    if (!ask) throw new Error('no private reply');
+    await call('POST', '/api/simulator/follows', { follows: true });
+    const tap = async () =>
+      (
+        await call<SimState>('POST', '/api/simulator/tap', {
+          payload: ask.payloads.btn_following,
+          label: 'I’m following',
+        })
+      ).body;
+
+    await call('PATCH', `/api/flows/${id}`, { on: false });
+    let before = outText(s).length;
+    s = await tap();
+    expect(outText(s)).toHaveLength(before);
+
+    await call('PATCH', `/api/flows/${id}`, { on: true });
+    s = await tap();
+    expect(outText(s).at(-1)).toMatch(/Thanks for following/);
+
+    await call('DELETE', `/api/flows/${id}`);
+    before = outText(s).length;
+    s = await tap();
+    expect(outText(s)).toHaveLength(before);
+  });
+
   it('chains into another flow and picks keyword over default reply', async () => {
     const second = await createFlow('Second', 'blank');
     await call('PUT', `/api/flows/${second}/draft`, {

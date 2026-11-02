@@ -358,6 +358,8 @@ export const flows = pgTable(
     /** The builder's working copy. Runs never use it directly; they use a version. */
     draft: jsonb('draft').$type<FlowGraph>().notNull(),
     publishedVersionId: uuid('published_version_id'),
+    /** Switched off: still published, but it answers nothing until it's switched back on. */
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

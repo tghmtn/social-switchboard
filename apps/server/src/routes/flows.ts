@@ -58,6 +58,14 @@ async function checkFlow(
   return issues;
 }
 
+/** Ends the conversations in the middle of a flow that's been switched off or deleted. */
+async function stopRuns(tx: Tx, flowId: string, now: Date) {
+  await tx
+    .update(runs)
+    .set({ status: 'cancelled', endedAt: now, updatedAt: now, wakeAt: null })
+    .where(and(eq(runs.flowId, flowId), eq(runs.status, 'waiting')));
+}
+
 export const flowRoutes =
   ({ db }: RouteDeps): FastifyPluginAsync =>
   async (app) => {
@@ -90,6 +98,7 @@ export const flowRoutes =
           draft: flows.draft,
           published: flowVersions.graph,
           publishedNumber: flowVersions.number,
+          disabledAt: flows.disabledAt,
           updatedAt: flows.updatedAt,
           triggers: sql<number>`(select count(*)::int from triggers t where t.flow_id = ${FLOW_ID})`,
           activeRuns: sql<number>`(select count(*)::int from runs r where r.flow_id = ${FLOW_ID} and r.status = 'waiting')`,
@@ -99,11 +108,26 @@ export const flowRoutes =
         .leftJoin(flowVersions, eq(flowVersions.id, flows.publishedVersionId))
         .where(and(eq(flows.workspaceId, workspace.id), isNull(flows.archivedAt)))
         .orderBy(desc(flows.updatedAt));
+      // The posts its comment triggers watch, for a thumbnail on its tile.
+      const postIds = new Map<string, string[]>();
+      const watching = await db
+        .select({ flowId: triggers.flowId, config: triggers.config })
+        .from(triggers)
+        .where(and(eq(triggers.workspaceId, workspace.id), eq(triggers.enabled, true)))
+        .orderBy(triggers.position, triggers.createdAt);
+      for (const t of watching) {
+        if (t.config.type !== 'comment') continue;
+        const ids = postIds.get(t.flowId) ?? [];
+        for (const m of t.config.mediaIds) if (!ids.includes(m)) ids.push(m);
+        postIds.set(t.flowId, ids);
+      }
       return {
-        flows: rows.map(({ draft, published, ...r }) => ({
+        flows: rows.map(({ draft, published, disabledAt, ...r }) => ({
           ...r,
           // Both sides come back from jsonb, so key order matches and a string compare is enough.
           hasUnpublishedChanges: !published || JSON.stringify(draft) !== JSON.stringify(published),
+          on: !disabledAt,
+          postIds: postIds.get(r.id) ?? [],
         })),
       };
     });
@@ -237,16 +261,31 @@ export const flowRoutes =
       return { issues: await checkFlow(db, workspace.id, parsed.data) };
     });
 
+    /** Renames it, or switches it on or off (off: published, but it answers nothing). */
     app.patch('/flows/:id', async (req) => {
       const { workspace } = who(req);
       const { id } = idParam.parse(req.params);
-      const { name } = z.object({ name: z.string().trim().min(1).max(100) }).parse(req.body);
+      const { name, on } = z
+        .object({ name: z.string().trim().min(1).max(100), on: z.boolean() })
+        .partial()
+        .refine((b) => b.name !== undefined || b.on !== undefined)
+        .parse(req.body);
       await ownFlow(workspace.id, id);
-      const [flow] = await db
-        .update(flows)
-        .set({ name, updatedAt: new Date() })
-        .where(eq(flows.id, id))
-        .returning();
+      const now = new Date();
+      const flow = await db.transaction(async (tx) => {
+        const [flow] = await tx
+          .update(flows)
+          .set({
+            // Switching on or off isn't an edit, so it doesn't move it up the list.
+            ...(name !== undefined ? { name, updatedAt: now } : {}),
+            ...(on !== undefined ? { disabledAt: on ? null : now } : {}),
+          })
+          .where(eq(flows.id, id))
+          .returning();
+        // Off means it stops answering, so conversations in the middle of it end too.
+        if (on === false) await stopRuns(tx, id, now);
+        return flow;
+      });
       return { flow };
     });
 
@@ -282,9 +321,10 @@ export const flowRoutes =
           })
           .returning({ id: flowVersions.id, number: flowVersions.number });
         if (!version) throw new Error('version insert returned no row');
+        // Publishing puts it live, so it switches back on too.
         await tx
           .update(flows)
-          .set({ publishedVersionId: version.id, updatedAt: new Date() })
+          .set({ publishedVersionId: version.id, disabledAt: null, updatedAt: new Date() })
           .where(eq(flows.id, id));
         return { version, issues };
       });
@@ -298,10 +338,7 @@ export const flowRoutes =
       const now = new Date();
       await db.transaction(async (tx) => {
         await tx.update(flows).set({ archivedAt: now, updatedAt: now }).where(eq(flows.id, id));
-        await tx
-          .update(runs)
-          .set({ status: 'cancelled', endedAt: now, updatedAt: now, wakeAt: null })
-          .where(and(eq(runs.flowId, id), eq(runs.status, 'waiting')));
+        await stopRuns(tx, id, now);
       });
       return reply.code(204).send();
     });
@@ -314,7 +351,8 @@ export const flowRoutes =
         .select({
           trigger: triggers,
           flowName: flows.name,
-          published: sql<boolean>`${flows.publishedVersionId} is not null`,
+          // Live: published and switched on.
+          published: sql<boolean>`${flows.publishedVersionId} is not null and ${flows.disabledAt} is null`,
         })
         .from(triggers)
         .innerJoin(flows, eq(flows.id, triggers.flowId))

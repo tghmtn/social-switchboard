@@ -18,6 +18,21 @@ import { notFound, requireAdmin, requireWorkspace, who } from './guard';
 // and the data the builder needs (connected accounts, recent posts).
 
 const rawBodies = new WeakMap<FastifyRequest, string>();
+
+/** A post as the app shows it: its picture, kind and caption. */
+const postSummary = (m: graph.Media) => ({
+  id: m.id,
+  caption: m.caption?.slice(0, 140) ?? '',
+  kind: m.media_product_type === 'REELS' ? 'reel' : (m.media_type?.toLowerCase() ?? 'post'),
+  thumbnail: m.thumbnail_url ?? (m.media_type === 'VIDEO' ? undefined : m.media_url),
+  permalink: m.permalink,
+  timestamp: m.timestamp,
+});
+
+// Looked-up posts, briefly, so the automations list doesn't ask Instagram on every visit.
+// (Picture links from Instagram's CDN expire after a while, so they aren't kept for long.)
+const POST_CACHE_MS = 30 * 60 * 1000;
+const postCache = new Map<string, { at: number; post: ReturnType<typeof postSummary> }>();
 const STATE_MAX_AGE = 15 * 60 * 1000;
 
 /** Where things live for this install; the wizard shows these to paste into Meta. */
@@ -570,23 +585,50 @@ export const instagramRoutes =
           account.igUserId,
           after,
         );
-        return {
-          after: page.after,
-          media: page.media.map((m) => ({
-            id: m.id,
-            caption: m.caption?.slice(0, 140) ?? '',
-            kind:
-              m.media_product_type === 'REELS' ? 'reel' : (m.media_type?.toLowerCase() ?? 'post'),
-            thumbnail: m.thumbnail_url ?? (m.media_type === 'VIDEO' ? undefined : m.media_url),
-            permalink: m.permalink,
-            timestamp: m.timestamp,
-          })),
-        };
+        return { after: page.after, media: page.media.map(postSummary) };
       } catch (err) {
         return reply.code(502).send({
           error: err instanceof graph.MetaError ? err.friendly : 'Instagram didn’t answer.',
         });
       }
+    });
+
+    /** Particular posts by id, however old: thumbnails for the automations list. */
+    app.get('/instagram/media/lookup', async (req, reply) => {
+      const { workspace } = who(req);
+      const { ids } = z
+        .object({
+          ids: z
+            .string()
+            .max(2000)
+            .transform((s) => [...new Set(s.split(',').filter(Boolean))])
+            .pipe(z.array(z.string().regex(/^[0-9A-Za-z_]{1,64}$/)).max(30)),
+        })
+        .parse(req.query);
+      const account = await accountFor(db, workspace.id, null);
+      const token = account ? decryptOptional(config.appSecret, account.accessTokenEnc) : undefined;
+      if (!account || !token) return reply.code(409).send({ error: 'not_connected' });
+      const host = account.apiHost === 'facebook' ? 'facebook' : 'instagram';
+      const now = Date.now();
+      const found = await Promise.all(
+        // Facebook Page posts (page_post ids) aren't Instagram media; they go without a picture.
+        ids
+          .filter((id) => !id.includes('_'))
+          .map(async (id) => {
+            const key = `${account.id}:${id}`;
+            const cached = postCache.get(key);
+            if (cached && now - cached.at < POST_CACHE_MS) return cached.post;
+            try {
+              const post = postSummary(await graph.mediaById(token, host, id));
+              postCache.set(key, { at: now, post });
+              if (postCache.size > 500) postCache.delete(postCache.keys().next().value ?? '');
+              return post;
+            } catch {
+              return undefined; // deleted, or not this account's: no picture
+            }
+          }),
+      );
+      return { media: found.filter((m) => m !== undefined) };
     });
 
     /**

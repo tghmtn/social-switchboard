@@ -562,6 +562,16 @@ export type Media = {
   timestamp?: string;
 };
 
+const MEDIA_FIELDS =
+  'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp';
+
+/** One post, however old (thumbnails for the posts a comment trigger watches). */
+export async function mediaById(token: string, host: Host, id: string): Promise<Media> {
+  const url = new URL(`${base(host)}/${encodeURIComponent(id)}`);
+  url.searchParams.set('fields', MEDIA_FIELDS);
+  return call<Media>(await http(url, { headers: bearer(token) }));
+}
+
 /**
  * Recent posts, newest first; `after` (from the previous page) gets older ones. With Unified
  * login `/me` is the system user, so ask the account itself.
@@ -574,10 +584,7 @@ export async function recentMedia(
   limit = 30,
 ): Promise<{ media: Media[]; after?: string }> {
   const url = new URL(`${base(host)}/${host === 'facebook' && igUserId ? igUserId : 'me'}/media`);
-  url.searchParams.set(
-    'fields',
-    'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp',
-  );
+  url.searchParams.set('fields', MEDIA_FIELDS);
   url.searchParams.set('limit', String(limit));
   if (after) url.searchParams.set('after', after);
   const data = await call<{

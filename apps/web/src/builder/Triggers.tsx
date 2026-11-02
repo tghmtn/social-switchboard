@@ -464,7 +464,7 @@ const postDate = (m: InstagramMedia) =>
     : '';
 
 /** One post, whole (never cropped), in a portrait tile like Instagram's grid. */
-function PostThumb({ post, className = '' }: { post?: InstagramMedia; className?: string }) {
+export function PostThumb({ post, className = '' }: { post?: InstagramMedia; className?: string }) {
   return (
     <span
       className={`flex aspect-[4/5] items-center justify-center overflow-hidden bg-surface-2 ${className}`}

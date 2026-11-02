@@ -29,6 +29,10 @@ export type FlowSummary = {
   triggers: number;
   activeRuns: number;
   totalRuns: number;
+  /** False when switched off: published, but answering nothing. */
+  on: boolean;
+  /** The posts its comment triggers watch. */
+  postIds: string[];
 };
 export type Trigger = {
   id: string;
@@ -46,6 +50,7 @@ export type FlowDetail = {
     name: string;
     draft: FlowGraph;
     publishedVersionId: string | null;
+    disabledAt: string | null;
     updatedAt: string;
   };
   issues: FlowIssue[];

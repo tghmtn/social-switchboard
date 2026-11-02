@@ -165,6 +165,16 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
           },
         });
       if (path === `/${IG_ID}`) return json({ id: IG_ID, username: 'tgfromdebug' });
+      if (path === '/m9')
+        return json({
+          id: 'm9',
+          media_type: 'VIDEO',
+          media_product_type: 'REELS',
+          thumbnail_url: 'https://cdn.example.test/m9.jpg',
+          caption: 'An old reel',
+        });
+      if (path === '/gone')
+        return json({ error: { message: 'Unsupported get request.', code: 100 } }, 400);
       if (path === `/${IG_ID}/media`)
         return url.searchParams.get('after') === 'c1'
           ? json({ data: [{ id: 'm2', media_type: 'IMAGE', media_url: 'y' }] })
@@ -418,6 +428,19 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     );
     expect(older.body.media.map((m) => m.id)).toEqual(['m2']);
     expect(older.body.after).toBeUndefined();
+    // Posts a trigger watches, by id however old. Ones Instagram won't give, and Facebook Page
+    // posts (page_post ids), come back without a picture.
+    const looked = await call<{ media: { id: string; kind: string; thumbnail?: string }[] }>(
+      'GET',
+      '/api/instagram/media/lookup?ids=m9,gone,123_456',
+    );
+    expect(looked.body.media).toEqual([
+      expect.objectContaining({
+        id: 'm9',
+        kind: 'reel',
+        thumbnail: 'https://cdn.example.test/m9.jpg',
+      }),
+    ]);
 
     // A comment signed with the Meta app secret becomes a private reply through graph.facebook.com.
     const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
