@@ -73,9 +73,12 @@ export const legalRoutes =
 <li>Anything you choose to tell us in the conversation, like your email address or what you’re interested in, plus tags and notes that describe the conversation.</li>
 </ul>
 <h2>How we use it</h2>
-<p>To reply to you, send you what you asked for, and follow up only where you’ve agreed to it. We record when you agree to follow-ups by email or text, and when you withdraw.</p>
+<p>To reply to you, send you what you asked for, and follow up only where you’ve agreed to it. We record when you agree to follow-ups by email or text, and when you withdraw. This software never texts the people it talks with; the only texts it sends are the team alerts below.</p>
 <h2>Who sees it</h2>
 <p>Only the people who run ${who}. We don’t sell your information. Meta delivers the messages between us under its own privacy policy.</p>
+<h2>Text message alerts</h2>
+<p>${who} can send its own team members alerts about conversations by text message. Only people with their own login get these texts, and only after they enter their own mobile number and switch texts on in Settings → Notifications. We use that number only to send the alerts they chose.</p>
+<p>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. Text messaging originator opt-in data and consent will not be shared with any third parties. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out or HELP for help.</p>
 <h2>How long we keep it</h2>
 <p>Until you ask us to delete it, or until ${who} deletes it.</p>
 <h2>Deleting your data</h2>
@@ -100,7 +103,7 @@ export const legalRoutes =
           `Terms · ${ws?.name ?? 'Social Switchboard'}`,
           `<div class="card">
 <h1>Terms of service</h1>
-<p class="muted">These terms cover messaging ${who} on Instagram or Messenger, where some replies are sent automatically.</p>
+<p class="muted">These terms cover messaging ${who} on Instagram, Messenger or its website chat, where some replies are sent automatically, and the text message alerts ${who} sends its own team.</p>
 <h2>Automated replies</h2>
 <p>When you comment a keyword, reply to a story or send us a message, you may get an automatic reply. It might ask a question, share a link or resource, or pass the conversation to a person. Replies are informational, and we can’t promise they’re complete or right for your situation.</p>
 <h2>What you share</h2>
@@ -109,6 +112,8 @@ export const legalRoutes =
 <p>Don’t use the conversation to send spam, abuse, or anything unlawful. We may stop replying to accounts that do.</p>
 <h2>Links to other sites</h2>
 <p>Replies may link to other websites. Those sites have their own terms and privacy policies.</p>
+<h2>Text message alerts</h2>
+<p>Social Switchboard team alerts: team members of ${who} who switch on text alerts get a text when a conversation needs them, such as one that needs a person or was assigned to them. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to cancel at any time, START to sign up again, or HELP for help. Carriers aren’t liable for delayed or undelivered messages. See our <a href="/privacy">privacy policy</a>.</p>
 <h2>Changes and contact</h2>
 <p>We may update these terms; the current version is always at this address. Questions? ${config.privacyContact ? `Email <a href="mailto:${esc(config.privacyContact)}">${esc(config.privacyContact)}</a> or message` : 'Message'} us on Instagram.</p>
 <p class="muted">Social Switchboard ${esc(config.version)}</p>

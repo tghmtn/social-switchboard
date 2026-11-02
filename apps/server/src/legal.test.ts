@@ -76,12 +76,21 @@ describe.skipIf(!databaseUrl)('privacy page and data deletion', () => {
     expect(res.headers['content-type']).toContain('text/html');
     expect(res.body).toContain('Most &#60;Likely&#62; Late');
     expect(res.body).not.toContain('<Likely>');
+    // Carriers' reviewers look for these before approving texting (10DLC).
+    expect(res.body).toContain('<h2>Text message alerts</h2>');
+    expect(res.body).toContain(
+      'No mobile information will be shared with third parties or affiliates for marketing or promotional purposes.',
+    );
+    expect(res.body).toContain('Reply STOP to opt out or HELP for help.');
   });
 
   it('serves terms of service', async () => {
     const res = await app.inject({ url: '/terms' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Terms of service');
+    expect(res.body).toContain('<h2>Text message alerts</h2>');
+    expect(res.body).toContain('Msg &amp; data rates may apply.');
+    expect(res.body).toContain('Carriers aren’t liable for delayed or undelivered messages.');
   });
 
   it('deletes the person behind a valid request and reports status', async () => {
