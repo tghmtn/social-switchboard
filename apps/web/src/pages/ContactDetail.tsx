@@ -27,7 +27,7 @@ const RUN_CHIP: Record<string, string> = {
 
 function eventText(e: Detail['events'][number], flowNames: Map<string, string>): string {
   const d = e.data as Record<string, string | boolean | null | undefined>;
-  const flow = (d.flowId && flowNames.get(String(d.flowId))) || 'a flow';
+  const flow = (d.flowId && flowNames.get(String(d.flowId))) || 'an automation';
   switch (e.type) {
     case 'contact_created':
       return `First message, on ${d.channel}`;
@@ -158,13 +158,14 @@ export function ContactDetail() {
           </span>
           {c.automationResumeAt ? (
             <p className="flex-1 text-[15px]">
-              You replied from Instagram {timeAgo(c.automationPausedAt)}, so flows won’t answer them
-              until {untilText(c.automationResumeAt)}. Each reply you send restarts the 12 hours.
+              You replied from Instagram {timeAgo(c.automationPausedAt)}, so automations won’t
+              answer them until {untilText(c.automationResumeAt)}. Each reply you send restarts the
+              12 hours.
             </p>
           ) : (
             <p className="flex-1 text-[15px]">
-              A flow handed this conversation off {timeAgo(c.automationPausedAt)}. Automation is
-              paused until you resume it.
+              An automation handed this conversation off {timeAgo(c.automationPausedAt)}. Automation
+              is paused until you resume it.
             </p>
           )}
           <button
@@ -310,14 +311,14 @@ export function ContactDetail() {
 
           <section className="card grid gap-2" aria-labelledby="runs-h">
             <h2 id="runs-h" className="text-lg font-bold">
-              Flows
+              Automations
             </h2>
             {data.runs.length === 0 && (
-              <p className="text-[13px] text-muted">No flows have run yet.</p>
+              <p className="text-[13px] text-muted">No automations have run yet.</p>
             )}
             {data.runs.map((r) => (
               <div key={r.id} className="flex items-center justify-between gap-2 text-[14px]">
-                <Link to={`/flows/${r.flowId}`} className="truncate font-bold">
+                <Link to={`/automations/${r.flowId}`} className="truncate font-bold">
                   {r.flowName}
                 </Link>
                 <span className={`chip ${RUN_CHIP[r.status] ?? ''}`}>{r.status}</span>

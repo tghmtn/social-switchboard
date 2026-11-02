@@ -20,7 +20,7 @@ export const newId = (prefix: string) => `${prefix}_${Math.random().toString(36)
 
 export const STEP_META: Record<FlowNodeType, { label: string; icon: PhosphorIcon; blurb: string }> =
   {
-    start: { label: 'Start', icon: Play, blurb: 'Where the flow begins' },
+    start: { label: 'Start', icon: Play, blurb: 'Where the automation begins' },
     message: {
       label: 'Message',
       icon: ChatText,
@@ -39,7 +39,11 @@ export const STEP_META: Record<FlowNodeType, { label: string; icon: PhosphorIcon
     },
     delay: { label: 'Delay', icon: Clock, blurb: 'Wait a while, or until a time of day' },
     split: { label: 'A/B split', icon: ArrowsSplit, blurb: 'Send people down paths at random' },
-    goto_flow: { label: 'Go to flow', icon: ArrowBendUpRight, blurb: 'Continue in another flow' },
+    goto_flow: {
+      label: 'Go to automation',
+      icon: ArrowBendUpRight,
+      blurb: 'Continue in another automation',
+    },
     handoff: {
       label: 'Hand off',
       icon: Handshake,
@@ -283,7 +287,7 @@ export function summarize(node: FlowNode, flowName: (id: string) => string | und
     case 'split':
       return 'Random, by weight';
     case 'goto_flow':
-      return `→ ${flowName(node.data.flowId) ?? 'Choose a flow'}`;
+      return `→ ${flowName(node.data.flowId) ?? 'Choose an automation'}`;
     case 'handoff':
       return node.data.note || 'Automation pauses until someone resumes it';
     case 'ai':

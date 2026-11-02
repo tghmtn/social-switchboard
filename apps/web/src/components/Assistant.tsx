@@ -33,7 +33,7 @@ type ToolItem = Extract<AssistantItem, { type: 'tool' }>;
 type AskItem = Extract<AssistantItem, { type: 'ask' }>;
 
 const SUGGESTIONS = [
-  'Build a flow with me: when someone comments GUIDE, DM them my guide and ask for their email.',
+  'Build an automation with me: when someone comments GUIDE, DM them my guide and ask for their email.',
   'Is my Instagram setup complete?',
   'Why didn’t my last commenter get a DM?',
 ];
@@ -244,7 +244,7 @@ export function AssistantPanel({ me, onClose }: { me: Me; onClose: () => void })
               {!thread?.items.length && (
                 <div className="grid gap-3">
                   <p className="text-[15px]">
-                    I can build flows with you step by step, check your setup, or find out why
+                    I can build automations with you step by step, check your setup, or find out why
                     someone didn’t get a reply. I’ll show you the page I’m talking about, and I
                     always ask before changing anything.
                   </p>

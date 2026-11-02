@@ -311,7 +311,7 @@ export type InboxDetail = {
     error: string | null;
     at: string;
     content: InboxMessageContent;
-    /** "them", "Flow", or the teammate's name. */
+    /** "them", "Automation", or the teammate's name. */
     by: string;
   }[];
   notes: { id: number; text: string; by: string; at: string }[];

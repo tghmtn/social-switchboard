@@ -148,7 +148,7 @@ class Runner {
     if (event.type === 'start') {
       if (event.from) return this.done(this.follow(event.from.nodeId, event.from.handle));
       if (!this.g.start)
-        return this.done({ status: 'failed', error: 'The flow has no starting step.' });
+        return this.done({ status: 'failed', error: 'The automation has no starting step.' });
       return this.done(this.runFrom(this.g.start.id));
     }
 
@@ -311,7 +311,7 @@ class Runner {
       if (++this.steps > MAX_STEPS_PER_ADVANCE) {
         return {
           status: 'failed',
-          error: `The flow ran ${MAX_STEPS_PER_ADVANCE} steps without pausing, so it was stopped. Check for a loop.`,
+          error: `The automation ran ${MAX_STEPS_PER_ADVANCE} steps without pausing, so it was stopped. Check for a loop.`,
         };
       }
       const node = this.g.node(current);

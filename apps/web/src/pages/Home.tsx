@@ -22,16 +22,16 @@ export function Home({ me }: { me: Me }) {
     { done: true, title: 'Create the owner account', detail: 'Done. You’re signed in.' },
     {
       done: (o?.liveFlows ?? 0) > 0,
-      title: 'Build and publish a flow',
+      title: 'Build and publish an automation',
       detail:
         'Start from the lead magnet template: someone sends a keyword and gets the resource right away, and a “Send me more” tap collects their email.',
-      to: '/flows',
+      to: '/automations',
     },
     {
       done: (o?.contacts ?? 0) > 0,
       title: 'Test it in the simulator',
       detail:
-        'Chat with your flow the way a follower would, before it goes anywhere near Instagram.',
+        'Chat with your automation the way a follower would, before it goes anywhere near Instagram.',
       to: '/simulator',
     },
     {
@@ -49,7 +49,7 @@ export function Home({ me }: { me: Me }) {
         title={
           o && o.liveFlows === 0 ? (
             <>
-              {greeting()}, {first}. Let’s build your <em className="hl">first flow</em>.
+              {greeting()}, {first}. Let’s build your <em className="hl">first automation</em>.
             </>
           ) : (
             <>
@@ -62,8 +62,8 @@ export function Home({ me }: { me: Me }) {
             <Link className="btn" to="/simulator">
               Open simulator
             </Link>
-            <Link className="btn btn-primary" to="/flows?new=1">
-              New flow
+            <Link className="btn btn-primary" to="/automations?new=1">
+              New automation
             </Link>
           </>
         }
@@ -77,7 +77,7 @@ export function Home({ me }: { me: Me }) {
         />
         <Stat label="Leads with email" value={o?.leads ?? '–'} detail="Ready to export as CSV" />
         <Stat
-          label="Live flows"
+          label="Live automations"
           value={o?.liveFlows ?? '–'}
           detail={o ? `${o.activeRuns} conversations in progress` : undefined}
         />

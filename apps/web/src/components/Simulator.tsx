@@ -2,7 +2,7 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, type SimMessage, type SimRun, type SimState, useApi } from '../api';
 import { FormError } from '../ui';
 
-// A chat with your own flows, as a follower would see it. Every action goes through the same
+// A chat with your own automations, as a follower would see it. Every action goes through the same
 // runtime Instagram will use; the server returns the whole new state after each one.
 
 const RUN_LABEL: Record<SimRun['status'], string> = {
@@ -53,7 +53,7 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
       } catch (err) {
         setError(
           err instanceof ApiError && err.status === 409
-            ? 'Publish this flow first, or test the draft.'
+            ? 'Publish this automation first, or test the draft.'
             : err instanceof ApiError && err.code === 'invalid_input'
               ? 'That didn’t go through. Check the message and try again.'
               : 'Something went wrong talking to the server.',
@@ -146,7 +146,7 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
               {flowId
                 ? 'Run this draft, or send a keyword like a follower would.'
                 : 'Send a keyword like a follower would.'}{' '}
-              Published flows answer here exactly as they will on Instagram.
+              Published automations answer here exactly as they will on Instagram.
             </p>
           )}
           {messages.map((m, i) => (

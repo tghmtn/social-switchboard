@@ -910,7 +910,7 @@ async function persist(
     if (ctx.hops >= MAX_FLOW_HOPS) {
       await recordEvent(tx, workspaceId, contactId, 'flow_failed', {
         flowId,
-        error: `Stopped after ${MAX_FLOW_HOPS} "go to flow" steps in a row.`,
+        error: `Stopped after ${MAX_FLOW_HOPS} "go to automation" steps in a row.`,
       });
       continue;
     }
@@ -926,7 +926,7 @@ async function persist(
     if (!version) {
       await recordEvent(tx, workspaceId, contactId, 'flow_failed', {
         flowId,
-        error: 'The flow to go to isn’t published.',
+        error: 'The automation to go to isn’t published.',
       });
       continue;
     }

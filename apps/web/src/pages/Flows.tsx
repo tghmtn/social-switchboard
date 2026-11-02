@@ -13,7 +13,7 @@ const STARTER_ICON: Record<string, SquareIconName> = {
   blank: 'board',
 };
 
-export function Flows() {
+export function Automations() {
   const { data, loading } = useApi<{ flows: FlowSummary[] }>('/flows');
   const [params, setParams] = useSearchParams();
   const creating = params.get('new') === '1';
@@ -22,10 +22,10 @@ export function Flows() {
   return (
     <Page>
       <PageHeader
-        title="Flows"
+        title="Automations"
         actions={
           <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-            New flow
+            New automation
           </button>
         }
       />
@@ -33,11 +33,11 @@ export function Flows() {
       {!loading && data?.flows.length === 0 && (
         <EmptyState
           icon="flow"
-          title="No flows yet"
-          body="A flow is a conversation that runs on its own: someone sends a keyword, the flow replies, asks questions, saves answers and hands off when a person is needed."
+          title="No automations yet"
+          body="An automation is a conversation that runs on its own: someone sends a keyword, the automation replies, asks questions, saves answers and hands off when a person is needed."
           action={
             <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-              Build your first flow
+              Build your first automation
             </button>
           }
         />
@@ -47,7 +47,7 @@ export function Flows() {
         {data?.flows.map((f) => (
           <Link
             key={f.id}
-            to={`/flows/${f.id}`}
+            to={`/automations/${f.id}`}
             className="card press grid gap-2 p-4 text-ink no-underline sm:gap-3 sm:p-6"
           >
             <div className="flex items-start justify-between gap-3">
@@ -105,18 +105,18 @@ function NewFlowDialog({ open, onClose }: { open: boolean; onClose: () => void }
     setError(undefined);
     try {
       const res = await api<{ flow: { id: string } }>('/flows', {
-        name: name || chosen?.name || 'New flow',
+        name: name || chosen?.name || 'New automation',
         starter,
       });
-      navigate(`/flows/${res.flow.id}`);
+      navigate(`/automations/${res.flow.id}`);
     } catch {
-      setError('Couldn’t create the flow. Try again.');
+      setError('Couldn’t create the automation. Try again.');
       setBusy(false);
     }
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="New flow">
+    <Dialog open={open} onClose={onClose} title="New automation">
       <form onSubmit={create} className="grid gap-5">
         <fieldset className="grid gap-3 sm:grid-cols-2">
           <legend className="mb-3 text-label uppercase text-muted">Start from</legend>
@@ -141,7 +141,12 @@ function NewFlowDialog({ open, onClose }: { open: boolean; onClose: () => void }
             </label>
           ))}
         </fieldset>
-        <Field label="Name" name="name" placeholder={chosen?.name ?? 'New flow'} maxLength={100} />
+        <Field
+          label="Name"
+          name="name"
+          placeholder={chosen?.name ?? 'New automation'}
+          maxLength={100}
+        />
         <FormError message={error} />
         <button type="submit" className="btn btn-primary w-fit" disabled={busy}>
           {busy ? 'Creating…' : 'Create and open'}

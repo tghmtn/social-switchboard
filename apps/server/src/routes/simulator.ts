@@ -168,7 +168,7 @@ export const simulatorRoutes =
             isNull(flows.archivedAt),
           ),
         );
-      if (!flow) throw notFound('Flow');
+      if (!flow) throw notFound('Automation');
 
       let versionId = flow.publishedVersionId;
       if (body.version === 'draft') {

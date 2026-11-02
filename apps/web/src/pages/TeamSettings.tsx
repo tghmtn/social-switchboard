@@ -23,7 +23,7 @@ type Invited = { to: string; link: string; sent: boolean; sendError?: string };
 const ROLE_HELP: Record<string, string> = {
   owner: 'Everything, including roles.',
   admin: 'Everything except roles: channels, notifications, invites.',
-  agent: 'The inbox, contacts and flows. No channel or team settings.',
+  agent: 'The inbox, contacts and automations. No channel or team settings.',
 };
 
 const errorText = (err: unknown, fallback: string) =>

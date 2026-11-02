@@ -128,7 +128,7 @@ export function Inspector({
           onChange={(e) => onChange({ ...step, data: { flowId: e.target.value } })}
         >
           <option value="choose" disabled>
-            Choose a flow…
+            Choose an automation…
           </option>
           {ctx.flows
             .filter((f) => f.id !== ctx.currentFlowId)
@@ -144,8 +144,8 @@ export function Inspector({
       body = (
         <>
           <p className="text-[14px] text-muted">
-            The flow ends here and automation pauses for this contact until someone resumes it from
-            their contact page.
+            The automation ends here and pauses for this contact until someone resumes it from their
+            contact page.
           </p>
           <TextArea
             label="Note for the team (optional)"
@@ -332,7 +332,7 @@ function MessageForm({ step, onChange, ctx }: Props<'message'> & { ctx: Ctx }) {
               }
             >
               <option value="url">Open a link</option>
-              <option value="flow">Continue the flow</option>
+              <option value="flow">Continue the automation</option>
             </Select>
             {b.kind === 'url' && (
               <Field
@@ -530,8 +530,8 @@ function AiRouteForm({ step, onChange, ctx }: Props<'ai_route'> & { ctx: Ctx }) 
     <>
       <p className="text-[14px] text-muted">
         The workspace’s AI (Settings → AI) reads their latest message, or the comment that started
-        the flow, and sends them down the path that fits by meaning, not exact words. Anything that
-        fits none of them, or a missing AI key, goes to “None of these”.
+        the automation, and sends them down the path that fits by meaning, not exact words. Anything
+        that fits none of them, or a missing AI key, goes to “None of these”.
       </p>
       {d.intents.map((x, i) => (
         <div
@@ -839,8 +839,8 @@ function ConditionForm({ step, onChange, ctx }: Props<'condition'> & { ctx: Ctx 
   return (
     <>
       <p className="text-[14px] text-muted">
-        Cases are checked in order. The first one that matches wins; if none match, the flow goes
-        down “Otherwise”.
+        Cases are checked in order. The first one that matches wins; if none match, the automation
+        goes down “Otherwise”.
       </p>
       {cases.map((c, ci) => (
         <Group

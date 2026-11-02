@@ -95,7 +95,7 @@ export function Channels() {
             <span className="text-lg font-bold">Web chat</span>
           </span>
           <span className="text-[14px] text-muted">
-            A chat button for your own website, running the same flows.
+            A chat button for your own website, running the same automations.
           </span>
           <span className={`chip w-fit ${wc?.settings.enabled ? 'chip-success' : 'chip-orange'}`}>
             {wc?.settings.enabled ? 'On' : 'Not set up'}
@@ -505,7 +505,7 @@ function Overview({
               onClick={async () => {
                 if (
                   !confirm(
-                    `Disconnect @${a.username}? Flows stop answering on this account until you connect it again. Contacts and history stay.`,
+                    `Disconnect @${a.username}? Automations stop answering on this account until you connect it again. Contacts and history stay.`,
                   )
                 )
                   return;

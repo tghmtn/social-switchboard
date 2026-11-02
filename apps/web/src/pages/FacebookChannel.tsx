@@ -59,7 +59,7 @@ export function FacebookChannel() {
         <section className="card card-flat grid gap-3">
           <h2 className="font-bold">Pages</h2>
           <p className="text-[14px] text-muted">
-            Messages to a connected Page and comments on its posts run your flows, the same as
+            Messages to a connected Page and comments on its posts run your automations, the same as
             Instagram: comment triggers answer with a private reply in Messenger.
           </p>
           {s.pages.length === 0 ? (
@@ -408,8 +408,8 @@ function Setup({
           </ul>
           <Chips items={s.scopes} />
           <p className="text-[14px] text-muted">
-            <code>pages_manage_engagement</code> lets flows post a public reply under a comment;
-            without it, the private reply in Messenger still works.
+            <code>pages_manage_engagement</code> lets automations post a public reply under a
+            comment; without it, the private reply in Messenger still works.
           </p>
           <p>Copy the new configuration’s ID into the form below.</p>
           <form onSubmit={save} className="grid gap-3 border-2 border-line p-3" autoComplete="off">
@@ -471,9 +471,9 @@ function Setup({
 
         <StepItem n={7} title="Test it" done={connected && Boolean(s.lastWebhookAt)}>
           <p>
-            Add a comment trigger (on any post, or a Page post) to a published flow. Then, from{' '}
-            <b>another</b> Facebook account, comment the keyword on a Page post. They should get a
-            private reply in Messenger from the Page, and replying continues the flow.
+            Add a comment trigger (on any post, or a Page post) to a published automation. Then,
+            from <b>another</b> Facebook account, comment the keyword on a Page post. They should
+            get a private reply in Messenger from the Page, and replying continues the automation.
           </p>
           <p className="text-[14px] text-muted">
             Until Meta reviews the app (App Review), it may only answer people with a role on it:
@@ -503,9 +503,9 @@ function Setup({
           <div>
             <dt className="font-bold">A comment got no reply</dt>
             <dd className="text-muted">
-              Check that the flow is published, its comment trigger isn’t limited to an Instagram
-              post, the commenter has a role on the app (until App Review), and webhooks are
-              subscribed to <code>feed</code>.
+              Check that the automation is published, its comment trigger isn’t limited to an
+              Instagram post, the commenter has a role on the app (until App Review), and webhooks
+              are subscribed to <code>feed</code>.
             </dd>
           </div>
         </dl>

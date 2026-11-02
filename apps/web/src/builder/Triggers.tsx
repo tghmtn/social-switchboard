@@ -60,7 +60,7 @@ const splitList = (raw: FormDataEntryValue | null, sep: RegExp) =>
 /** Asked of the post picker: what's picked now, and what to do with the new choice. */
 type PostRequest = { selected: string[]; onDone: (ids: string[]) => void | Promise<void> };
 
-/** Shown when the start step is selected: what starts this flow. */
+/** Shown when the start step is selected: what starts this automation. */
 export function TriggersEditor({
   flowId,
   triggers,
@@ -120,16 +120,16 @@ export function TriggersEditor({
 
   return (
     <div className="grid gap-4">
-      <h2 className="text-lg font-bold">What starts this flow</h2>
+      <h2 className="text-lg font-bold">What starts this automation</h2>
       {!published && (
         <p className="border-2 border-accent bg-surface px-3 py-2 text-[14px]">
-          Triggers only fire once the flow is published. Use “Run this draft” in the Test tab before
-          then.
+          Triggers only fire once the automation is published. Use “Run this draft” in the Test tab
+          before then.
         </p>
       )}
       <p className="text-[14px] text-muted">
-        Each trigger is one way into this flow, with its own keywords. A flow can have several, like
-        a comment trigger and a DM keyword trigger.
+        Each trigger is one way into this automation, with its own keywords. An automation can have
+        several, like a comment trigger and a DM keyword trigger.
       </p>
       <div className="grid gap-2">
         {triggers.length === 0 && <p className="text-[14px] text-muted">No triggers yet.</p>}
@@ -298,7 +298,7 @@ export function TriggersEditor({
               hint="One per line. Each comment gets one, picked at random, so replies don’t all look the same."
             />
             <p className="border-2 border-line bg-surface-2 px-3 py-2 text-[13px]">
-              The flow’s first message is sent as Instagram’s private reply to the comment.
+              The automation’s first message is sent as Instagram’s private reply to the comment.
               Instagram allows only one until they write back, so give that first message a quick
               reply or button.
             </p>

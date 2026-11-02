@@ -191,18 +191,18 @@ describe.skipIf(!databaseUrl)('assistant', () => {
     ];
     const sent = await call<View>('POST', `/api/assistant/threads/${thread.id}/messages`, {
       text: 'Make a flow that sends my guide',
-      page: '/flows',
+      page: '/automations',
     });
     expect(sent.status).toBe(202);
     const waiting = await settled(thread.id);
     expect(waiting.status).toBe('waiting');
     expect(new Set(keys)).toEqual(new Set(['sk-ant-test-0123456789abcdefghij']));
-    const proposal = waiting.items.find((i) => i.label === 'Create the flow “Guide”');
+    const proposal = waiting.items.find((i) => i.label === 'Create the automation “Guide”');
     expect(proposal).toMatchObject({
       state: 'waiting',
       detail: ['Start', 'Message: Here’s the guide 👇 (More)'],
     });
-    expect(waiting.items.find((i) => i.label === 'Looked at your flows')?.state).toBe('done');
+    expect(waiting.items.find((i) => i.label === 'Looked at your automations')?.state).toBe('done');
     expect(await db.select().from(flows)).toHaveLength(0); // nothing built before the yes
 
     await call('POST', `/api/assistant/threads/${thread.id}/decide`, { approve: ['tu_2'] });
@@ -540,7 +540,7 @@ describe.skipIf(!databaseUrl)('assistant', () => {
       ),
       reply(
         [
-          { type: 'tool_use', id: 'tu_p', name: 'open_page', input: { path: '/flows' } },
+          { type: 'tool_use', id: 'tu_p', name: 'open_page', input: { path: '/automations' } },
           { type: 'tool_use', id: 'tu_x', name: 'open_page', input: { path: '/admin/secret' } },
         ],
         'tool_use',
@@ -570,8 +570,8 @@ describe.skipIf(!databaseUrl)('assistant', () => {
       answer: 'https://example.com/guide.pdf',
     });
     expect(done.items.find((i) => i.id === 'tu_p')).toMatchObject({
-      label: 'Opened Flows',
-      navigate: '/flows',
+      label: 'Opened Automations',
+      navigate: '/automations',
       state: 'done',
     });
     // Only the app's own pages.
@@ -685,7 +685,7 @@ describe.skipIf(!databaseUrl)('assistant', () => {
       expect(v.status).toBe('idle');
       expect(v.items.map((i) => i.text ?? i.label)).toEqual([
         'Any flows?',
-        'Looked at your flows',
+        'Looked at your automations',
         'You have no flows yet.',
       ]);
       const second = openaiCalls.filter((c) => c.path === '/responses')[1]?.body ?? {};

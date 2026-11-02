@@ -79,7 +79,8 @@ export function FlowEditor() {
     window.addEventListener(FLOW_CHANGED, changed);
     return () => window.removeEventListener(FLOW_CHANGED, changed);
   }, [id, reload]);
-  if (detail.error) return <p className="p-8 font-bold text-danger">Couldn’t load this flow.</p>;
+  if (detail.error)
+    return <p className="p-8 font-bold text-danger">Couldn’t load this automation.</p>;
   if (!detail.data) return null;
   return (
     <ReactFlowProvider>
@@ -330,17 +331,17 @@ function Editor({
     <div className="flex h-dvh flex-col">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b-2 border-edge bg-surface px-2 pt-[calc(0.375rem+env(safe-area-inset-top))] pb-1.5 sm:px-4 sm:py-3">
         <Link
-          to="/flows"
+          to="/automations"
           className="grid size-11 shrink-0 place-items-center text-[22px] font-bold text-ink no-underline sm:size-auto sm:text-[14px] sm:text-link sm:underline"
-          aria-label="Back to flows"
+          aria-label="Back to automations"
         >
           <span aria-hidden className="sm:hidden">
             ←
           </span>
-          <span className="hidden sm:inline">← Flows</span>
+          <span className="hidden sm:inline">← Automations</span>
         </Link>
         <label htmlFor="flow-name" className="sr-only">
-          Flow name
+          Automation name
         </label>
         <input
           id="flow-name"
@@ -549,7 +550,8 @@ function Editor({
               <div className="grid gap-4">
                 <p className="text-[15px] text-muted">
                   Select a step to edit it. Select <b>Start</b> to set the keywords that begin this
-                  flow. Drag from an output on the right of a step to the next step to connect them.
+                  automation. Drag from an output on the right of a step to the next step to connect
+                  them.
                 </p>
                 {errors.length + warnings.length === 0 ? (
                   <p className="chip chip-success w-fit">No problems found</p>

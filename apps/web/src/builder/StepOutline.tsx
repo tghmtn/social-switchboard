@@ -146,7 +146,7 @@ export function ExitsEditor({
               value={edge?.target ?? ''}
               onChange={(e) => onConnect(h.id, e.target.value || null)}
             >
-              <option value="">Nothing: the flow ends here</option>
+              <option value="">Nothing: the automation ends here</option>
               {options.map((n) => (
                 <option key={n.id} value={n.id}>
                   {numbers.get(n.id)}. {stepTitle(n.data.step)}

@@ -309,7 +309,7 @@ export const inboxRoutes =
                 ? 'them'
                 : content.byPerson
                   ? (content.sentBy && names.get(content.sentBy)) || 'You (in Instagram)'
-                  : 'Flow',
+                  : 'Automation',
           };
         }),
         notes: notes.map((n) => ({

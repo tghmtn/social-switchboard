@@ -36,10 +36,13 @@ export type Notice = {
 };
 
 export const NOTICE_INFO: Record<NoticeKind, { label: string; help: string }> = {
-  handoff: { label: 'Needs a person', help: 'A flow or the AI handed a conversation to the team.' },
+  handoff: {
+    label: 'Needs a person',
+    help: 'An automation or the AI handed a conversation to the team.',
+  },
   assigned: { label: 'Assigned to me', help: 'A teammate gave you a conversation.' },
-  team: { label: 'Alerts from flows', help: 'A flow’s “notify the team” step.' },
-  unanswered: { label: 'Unanswered messages', help: 'A DM no flow answered.' },
+  team: { label: 'Alerts from automations', help: 'An automation’s “notify the team” step.' },
+  unanswered: { label: 'Unanswered messages', help: 'A DM no automation answered.' },
   paused: {
     label: 'Messages while the bot is paused',
     help: 'Someone wrote while the bot was paused for them.',
@@ -512,8 +515,8 @@ export function inviteEmail(invite: {
 }) {
   const what =
     invite.role === 'admin'
-      ? 'You’ll be able to run everything: the inbox, flows, channels and notifications.'
-      : 'You’ll answer messages in the shared inbox and help with contacts and flows.';
+      ? 'You’ll be able to run everything: the inbox, automations, channels and notifications.'
+      : 'You’ll answer messages in the shared inbox and help with contacts and automations.';
   const until = invite.expiresAt.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',

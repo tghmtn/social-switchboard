@@ -9,7 +9,7 @@ export const contactName = (c: {
   lastName: string | null;
   username?: string | null;
   email?: string | null;
-  /** Web chat visitors are anonymous until a flow asks their name. */
+  /** Web chat visitors are anonymous until an automation asks their name. */
   channel?: string | null;
 }) =>
   [c.firstName, c.lastName].filter(Boolean).join(' ') ||

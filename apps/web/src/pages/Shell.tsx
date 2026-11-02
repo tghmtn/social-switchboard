@@ -13,7 +13,7 @@ import { Avatar, Wordmark } from '../ui';
 
 const NAV: { to: string; label: string; icon: SquareIconName; end?: boolean }[] = [
   { to: '/', label: 'Today', icon: 'home', end: true },
-  { to: '/flows', label: 'Flows', icon: 'flow' },
+  { to: '/automations', label: 'Automations', icon: 'flow' },
   { to: '/contacts', label: 'Contacts', icon: 'kit' },
   { to: '/simulator', label: 'Simulator', icon: 'phone' },
   { to: '/channels', label: 'Channels', icon: 'chat' },
@@ -25,18 +25,23 @@ const NAV: { to: string; label: string; icon: SquareIconName; end?: boolean }[] 
 const TABS: { to: string; label: string; icon: SquareIconName; end?: boolean }[] = [
   { to: '/', label: 'Today', icon: 'home', end: true },
   { to: '/inbox', label: 'Inbox', icon: 'inbox' },
-  { to: '/flows', label: 'Flows', icon: 'flow' },
+  { to: '/automations', label: 'Automations', icon: 'flow' },
   { to: '/contacts', label: 'Contacts', icon: 'kit' },
 ];
 const MORE: { to: string; label: string; icon: SquareIconName; detail: string }[] = [
   { to: '/channels', label: 'Channels', icon: 'chat', detail: 'Instagram, Facebook, web chat' },
-  { to: '/simulator', label: 'Simulator', icon: 'phone', detail: 'Test flows like a follower' },
+  {
+    to: '/simulator',
+    label: 'Simulator',
+    icon: 'phone',
+    detail: 'Test automations like a follower',
+  },
   { to: '/settings', label: 'Settings', icon: 'sliders', detail: 'Team, alerts, AI, fields' },
 ];
 
 /**
  * The app frame. From 900px: a 240px sidebar. On phones, a slim top bar and a bottom tab bar
- * (Today, Inbox, Flows, Contacts, More), and a conversation or the flow builder takes the whole
+ * (Today, Inbox, Automations, Contacts, More), and a conversation or the automation builder takes the whole
  * screen, with its own back button.
  */
 export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
@@ -82,8 +87,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // A new page closes the More sheet.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs on navigation
   useEffect(() => setMore(false), [location.pathname]);
-  // Full screen on phones: a conversation and the flow builder bring their own header.
-  const immersive = /^\/(inbox|flows)\/[^/]+/.test(location.pathname);
+  // Full screen on phones: a conversation and the automation builder bring their own header.
+  const immersive = /^\/(inbox|automations)\/[^/]+/.test(location.pathname);
   const moreActive = MORE.some((m) => location.pathname.startsWith(m.to));
 
   async function signOut() {
@@ -267,7 +272,9 @@ function MoreSheet({
           </span>
           <span className="grid flex-1 text-left leading-tight">
             <span className="font-bold">Assistant</span>
-            <span className="text-[13px] font-normal text-muted">Build flows, check setup</span>
+            <span className="text-[13px] font-normal text-muted">
+              Build automations, check setup
+            </span>
           </span>
         </button>
         {onInstall && (
@@ -326,7 +333,7 @@ function ThemeToggle({
   );
 }
 
-/** Standard page padding and width. The flow builder skips this to use the full screen. */
+/** Standard page padding and width. The automation builder skips this to use the full screen. */
 export function Page({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
     <div

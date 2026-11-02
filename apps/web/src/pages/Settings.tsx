@@ -225,10 +225,10 @@ function DataSection() {
             Contact fields
           </h2>
           <p className="mt-1 text-[15px] text-muted">
-            Details you save about each person, like an interest or a budget. Flows fill them in (an{' '}
-            <b>Ask</b> step saves the answer, an <b>AI conversation</b> picks them out of the chat),
-            and messages can use them, like <code>{'{{first_name}}'}</code>. First name, last name,
-            email and phone are built in.
+            Details you save about each person, like an interest or a budget. Automations fill them
+            in (an <b>Ask</b> step saves the answer, an <b>AI conversation</b> picks them out of the
+            chat), and messages can use them, like <code>{'{{first_name}}'}</code>. First name, last
+            name, email and phone are built in.
           </p>
         </div>
         <ul className="divide-y-2 divide-line border-2 border-edge bg-surface shadow-hard">
@@ -253,7 +253,7 @@ function DataSection() {
           ))}
           {fields.data?.fields.length === 0 && (
             <li className="px-4 py-4 text-muted">
-              No custom fields yet. Flows create them automatically when they save an answer.
+              No custom fields yet. Automations create them automatically when they save an answer.
             </li>
           )}
         </ul>
@@ -281,7 +281,7 @@ function DataSection() {
             Add field
           </button>
           <p className="text-[13px] text-muted sm:col-span-4">
-            The key is how flows use it, like <code>{'{{budget}}'}</code>: lowercase letters,
+            The key is how automations use it, like <code>{'{{budget}}'}</code>: lowercase letters,
             numbers and _.
           </p>
           <div className="empty:hidden sm:col-span-4">
@@ -303,8 +303,8 @@ function DataSection() {
         <div className="grid gap-3 sm:grid-cols-2">
           <Explainer title="How people get tagged">
             <li>
-              <b>By a flow</b>, automatically: an <b>Actions</b> step with “Add a tag”. For example,
-              tag everyone who asks for your guide.
+              <b>By an automation</b>, automatically: an <b>Actions</b> step with “Add a tag”. For
+              example, tag everyone who asks for your guide.
             </li>
             <li>
               <b>By hand</b>: <b>+ Tag</b> on a conversation in the Inbox, or on a person’s page in
@@ -316,8 +316,8 @@ function DataSection() {
               <b>Finding people</b>: filter the Inbox or Contacts to everyone with a tag.
             </li>
             <li>
-              <b>Steering flows</b>: a <b>Condition</b> step can check for a tag, so someone who
-              already got the guide isn’t sent it twice.
+              <b>Steering automations</b>: a <b>Condition</b> step can check for a tag, so someone
+              who already got the guide isn’t sent it twice.
             </li>
           </Explainer>
         </div>
@@ -358,7 +358,7 @@ function DataSection() {
             ))}
             {tags.data?.tags.length === 0 && (
               <p className="text-muted">
-                None yet. Tags show up here as your flows and your team add them.
+                None yet. Tags show up here as your automations and your team add them.
               </p>
             )}
           </div>
@@ -374,8 +374,8 @@ function DataSection() {
             </button>
           </div>
           <p className="text-[13px] text-muted">
-            Rarely needed: flows and the Inbox create tags as they use them. Adding one here just
-            has it ready to pick.
+            Rarely needed: automations and the Inbox create tags as they use them. Adding one here
+            just has it ready to pick.
           </p>
           <FormError message={tagError} />
         </form>

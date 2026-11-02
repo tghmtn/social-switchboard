@@ -37,6 +37,7 @@ Several MIT-licensed open-source projects already cover parts of this. Each one 
 - **Stack:** TypeScript end-to-end (see below).
 - **Pilot:** build and test on the maintainer's own account (switched to Creator), with their spouse's account as the test commenter. The spouse's business account currently runs on ManyChat, so it moves over on a planned cutover day once Phase 2 is solid (see Phase 2).
 - **Domain for this install:** `switchboard.gharring.com`, through a Cloudflare Tunnel.
+- **"Flows" are called "Automations" in the app** (2026-11-01). Only the words people see changed: pages live at `/automations` (old `/flows` links redirect), and the code, API, database and the assistant's tools still say flow.
 
 ## Borrowing rules
 

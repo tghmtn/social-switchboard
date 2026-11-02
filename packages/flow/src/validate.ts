@@ -32,13 +32,13 @@ export function validateFlow(graph: FlowGraph): FlowIssue[] {
     issues.push({
       severity: 'error',
       code: 'no_start',
-      message: 'The flow needs a starting step.',
+      message: 'The automation needs a starting step.',
     });
   for (const extra of starts.slice(1)) {
     issues.push({
       severity: 'error',
       code: 'multiple_starts',
-      message: 'A flow can only have one starting step.',
+      message: 'An automation can only have one starting step.',
       nodeId: extra.id,
     });
   }

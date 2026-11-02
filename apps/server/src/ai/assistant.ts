@@ -116,7 +116,7 @@ export const TOOLS: Tool[] = [
   {
     name: 'open_page',
     description:
-      'Shows a page of the app beside this chat, so the person sees what you mean or what you just built. Paths: / (Today), /flows, /flows/<flowId> (the builder), /contacts, /contacts/<contactId>, /inbox, /inbox/<contactId>, /channels, /channels/instagram (Instagram setup), /channels/facebook (Facebook Pages), /simulator, /settings, /settings/<section> (general, team, notifications, replies for saved replies, ai, data for fields and tags).',
+      'Shows a page of the app beside this chat, so the person sees what you mean or what you just built. Paths: / (Today), /automations, /automations/<flowId> (the builder), /contacts, /contacts/<contactId>, /inbox, /inbox/<contactId>, /channels, /channels/instagram (Instagram setup), /channels/facebook (Facebook Pages), /simulator, /settings, /settings/<section> (general, team, notifications, replies for saved replies, ai, data for fields and tags).',
     input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
   },
   {
@@ -220,7 +220,7 @@ const waitsForPerson = (name: string) => CHANGING_TOOLS.has(name) || name === AS
 
 /** Pages the assistant may open. */
 export const PAGE_PATH =
-  /^\/(flows(\/[\w-]{1,64})?|contacts(\/[\w-]{1,64})?|inbox(\/[\w-]{1,64})?|channels(\/(instagram|facebook))?|simulator|settings(\/(general|team|notifications|replies|ai|data))?)?$/;
+  /^\/((automations|flows)(\/[\w-]{1,64})?|contacts(\/[\w-]{1,64})?|inbox(\/[\w-]{1,64})?|channels(\/(instagram|facebook))?|simulator|settings(\/(general|team|notifications|replies|ai|data))?)?$/;
 
 // ---------------------------------------------------------------- tool inputs
 
@@ -333,7 +333,7 @@ export function describeGraph(graph: { nodes: unknown[]; edges: unknown[] }): st
       case 'split':
         return `Split: ${((d.branches as { label: string; weight: number }[]) ?? []).map((b) => `${b.label} ${b.weight}%`).join(' / ')}`;
       case 'goto_flow':
-        return 'Go to another flow';
+        return 'Go to another automation';
       case 'handoff':
         return `Hand off to a person${d.note ? `: ${short(d.note, 50)}` : ''}`;
       case 'ai':
@@ -433,7 +433,7 @@ async function runTool(
     }
     case 'list_flows': {
       const r = await api('GET', '/api/flows');
-      return r.status === 200 ? ok(r.body, 'Looked at the flows') : err(failed(r));
+      return r.status === 200 ? ok(r.body, 'Looked at the automations') : err(failed(r));
     }
     case 'get_flow': {
       const input = parse(inputs.get_flow);
@@ -563,7 +563,7 @@ async function runTool(
         );
       return ok(
         { flowId, wiringProblems: (saved.body as { issues: unknown }).issues, published: false },
-        `Created the flow “${input.name}” (draft)`,
+        `Created the automation “${input.name}” (draft)`,
       );
     }
     case 'update_flow': {
@@ -581,7 +581,7 @@ async function runTool(
       }
       return ok(
         { wiringProblems: (saved.body as { issues: unknown }).issues, published: false },
-        'Changed the flow’s draft',
+        'Changed the automation’s draft',
       );
     }
     case 'add_trigger': {
@@ -609,7 +609,7 @@ async function runTool(
       const input = parse(inputs.publish_flow);
       if (!input) return badInput;
       const r = await api('POST', `/api/flows/${encodeURIComponent(input.flowId)}/publish`, {});
-      return r.status < 300 ? ok(r.body, 'Published the flow') : err(failed(r));
+      return r.status < 300 ? ok(r.body, 'Published the automation') : err(failed(r));
     }
     default:
       return err(`There's no tool called ${name}.`);

@@ -209,7 +209,11 @@ export function Inbox() {
                     <span
                       className={`truncate text-[13px] ${c.unread ? 'text-ink' : 'text-muted'}`}
                     >
-                      {c.last.direction === 'out' ? (c.last.byPerson ? 'You: ' : 'Flow: ') : ''}
+                      {c.last.direction === 'out'
+                        ? c.last.byPerson
+                          ? 'You: '
+                          : 'Automation: '
+                        : ''}
                       {c.last.text}
                     </span>
                     <span className="flex flex-wrap gap-1.5">
@@ -253,7 +257,7 @@ export function Inbox() {
             <EmptyState
               icon="inbox"
               title="Pick a conversation"
-              body="Read the whole thread, reply, leave a note for your team, or take over from a flow."
+              body="Read the whole thread, reply, leave a note for your team, or take over from an automation."
             />
           </div>
         )}
@@ -525,7 +529,7 @@ function ConversationMenu({
   );
 }
 
-/** Whether flows answer this person right now, with the switch to change it. */
+/** Whether automations answer this person right now, with the switch to change it. */
 function BotStatus({
   contact: c,
   onChange,
@@ -541,10 +545,10 @@ function BotStatus({
       </span>
       <span className="hidden text-muted sm:inline">
         {!paused
-          ? 'Flows answer their messages. Replying here pauses them for 12 hours.'
+          ? 'Automations answer their messages. Replying here pauses them for 12 hours.'
           : c.automationResumeAt
-            ? `You replied, so flows stay quiet until ${clock(c.automationResumeAt)}.`
-            : 'Flows stay quiet until someone turns the bot back on.'}
+            ? `You replied, so automations stay quiet until ${clock(c.automationResumeAt)}.`
+            : 'Automations stay quiet until someone turns the bot back on.'}
       </span>
       <button
         type="button"
@@ -578,7 +582,7 @@ function Bubble({ m }: { m: InboxDetail['messages'][number] }) {
       <div
         className={`grid gap-2 border-2 px-3 py-2 text-[15px] ${
           mine
-            ? m.by === 'Flow'
+            ? m.by === 'Automation'
               ? 'border-primary bg-surface'
               : 'border-edge bg-surface-2'
             : c.kind === 'in' && c.comment

@@ -18,7 +18,7 @@ import { FormError, SecretField, Select, timeAgo } from '../ui';
 const EFFORT_HELP: Record<string, string> = {
   low: 'Quick answers, fewest tokens.',
   medium: 'Balanced (the default).',
-  high: 'Thinks harder; best for building bigger flows. Uses more tokens.',
+  high: 'Thinks harder; best for building bigger automations. Uses more tokens.',
 };
 
 const PROVIDER_INFO: Record<
@@ -74,9 +74,9 @@ export function AiSection({ me }: { me: Me }) {
           AI
         </h2>
         <p className="mt-1 text-[15px] text-muted">
-          The assistant (✨ in the menu), AI steps in flows, and ✨ Suggest in the Inbox run on your
-          own API key from Anthropic or OpenAI. Save one or both and pick the one in use. The
-          provider bills your key directly; nothing goes through anyone else.
+          The assistant (✨ in the menu), AI steps in automations, and ✨ Suggest in the Inbox run
+          on your own API key from Anthropic or OpenAI. Save one or both and pick the one in use.
+          The provider bills your key directly; nothing goes through anyone else.
         </p>
       </div>
 

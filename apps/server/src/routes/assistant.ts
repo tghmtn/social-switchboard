@@ -54,8 +54,8 @@ type ToolResultBlock = {
 
 const READ_LABELS: Record<string, string> = {
   get_overview: 'Checked your setup',
-  list_flows: 'Looked at your flows',
-  get_flow: 'Opened a flow',
+  list_flows: 'Looked at your automations',
+  get_flow: 'Opened an automation',
   list_posts: 'Looked at your posts',
   find_contacts: 'Searched contacts',
   get_contact_history: 'Read a conversation',
@@ -64,8 +64,8 @@ const READ_LABELS: Record<string, string> = {
 };
 
 const PAGE_NAMES: [RegExp, string][] = [
-  [/^\/flows\/./, 'the flow'],
-  [/^\/flows$/, 'Flows'],
+  [/^\/(automations|flows)\/./, 'the automation'],
+  [/^\/(automations|flows)$/, 'Automations'],
   [/^\/contacts\/./, 'the contact'],
   [/^\/contacts$/, 'Contacts'],
   [/^\/inbox\/./, 'the conversation'],
@@ -371,7 +371,7 @@ export const assistantRoutes =
       );
       const flowName = (input: unknown) => {
         const fid = (input as { flowId?: string }).flowId;
-        return fid && names.get(fid) ? `“${names.get(fid)}”` : 'a flow';
+        return fid && names.get(fid) ? `“${names.get(fid)}”` : 'an automation';
       };
 
       type Item =
@@ -450,7 +450,7 @@ export const assistantRoutes =
             const graph = input.graph as { nodes: unknown[]; edges: unknown[] } | undefined;
             const label =
               b.name === 'create_flow'
-                ? `Create the flow “${String(input.name)}”`
+                ? `Create the automation “${String(input.name)}”`
                 : b.name === 'update_flow'
                   ? `Change ${flowName(input)}${input.name ? `, renamed “${String(input.name)}”` : ''}`
                   : b.name === 'add_trigger'

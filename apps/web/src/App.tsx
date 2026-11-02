@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 import { ApiError, api, type Me } from './api';
 import { AcceptInvite } from './pages/AcceptInvite';
 import { Channels, InstagramChannel } from './pages/Channels';
@@ -7,7 +7,7 @@ import { ContactDetail } from './pages/ContactDetail';
 import { Contacts } from './pages/Contacts';
 import { FacebookChannel } from './pages/FacebookChannel';
 import { FlowEditor } from './pages/FlowEditor';
-import { Flows } from './pages/Flows';
+import { Automations } from './pages/Flows';
 import { Home } from './pages/Home';
 import { Inbox } from './pages/Inbox';
 import { Login } from './pages/Login';
@@ -75,8 +75,9 @@ export function App() {
           <Routes>
             <Route element={<Shell me={state.me} onSignOut={() => setState({ kind: 'login' })} />}>
               <Route index element={<Home me={state.me} />} />
-              <Route path="/flows" element={<Flows />} />
-              <Route path="/flows/:id" element={<FlowEditor />} />
+              <Route path="/automations" element={<Automations />} />
+              <Route path="/automations/:id" element={<FlowEditor />} />
+              <Route path="/flows/*" element={<OldFlowsLink />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/contacts/:id" element={<ContactDetail />} />
               <Route path="/simulator" element={<SimulatorPage />} />
@@ -94,4 +95,10 @@ export function App() {
         </BrowserRouter>
       );
   }
+}
+
+/** Flows were renamed Automations: old links, bookmarks and alerts still land on the right page. */
+function OldFlowsLink() {
+  const { pathname, search } = useLocation();
+  return <Navigate to={pathname.replace(/^\/flows/, '/automations') + search} replace />;
 }

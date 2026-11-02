@@ -49,7 +49,7 @@ async function checkFlow(
         issues.push({
           severity: 'error',
           code: 'edge_unknown_node',
-          message: 'This step goes to a flow that doesn’t exist.',
+          message: 'This step goes to an automation that doesn’t exist.',
           nodeId: t.node,
         });
       }
@@ -68,7 +68,7 @@ export const flowRoutes =
         .select()
         .from(flows)
         .where(and(eq(flows.id, id), eq(flows.workspaceId, workspaceId), isNull(flows.archivedAt)));
-      if (!flow) throw notFound('Flow');
+      if (!flow) throw notFound('Automation');
       return flow;
     };
 
@@ -219,7 +219,7 @@ export const flowRoutes =
           .where(
             and(eq(flows.id, id), eq(flows.workspaceId, workspace.id), isNull(flows.archivedAt)),
           );
-        if (!flow) throw notFound('Flow');
+        if (!flow) throw notFound('Automation');
         const issues = await checkFlow(tx, workspace.id, flow.draft);
         if (issues.some((i) => i.severity === 'error'))
           return reply.code(422).send({ error: 'flow_has_errors', issues });

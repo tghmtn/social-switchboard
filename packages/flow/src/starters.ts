@@ -368,7 +368,7 @@ export const STARTERS: Starter[] = [
   },
   {
     key: 'blank',
-    name: 'Blank flow',
+    name: 'Blank automation',
     description: 'Start from an empty canvas.',
     graph: { nodes: [{ id: 'start', type: 'start', position: at(0) }], edges: [] },
   },

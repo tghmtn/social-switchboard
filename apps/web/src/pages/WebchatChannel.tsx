@@ -37,7 +37,7 @@ export function WebchatChannel() {
       <PageHeader title="Web chat" />
       <p className="max-w-2xl text-[15px] text-muted">
         A chat button for your own website: a blog, a shop, a Ghost or WordPress site. Visitors chat
-        with the same flows as on Instagram and Facebook, and their conversations land in your
+        with the same automations as on Instagram and Facebook, and their conversations land in your
         Inbox. Nothing to set up with Meta or anyone else.
       </p>
       {data && <Setup data={data} onSaved={setData} />}
@@ -139,7 +139,7 @@ function Setup({ data, onSaved }: { data: Webchat; onSaved: (d: Webchat) => void
             maxLength={300}
           />
           <span className="text-[13px] text-muted">
-            What visitors see before they write. Your flows answer once they do.
+            What visitors see before they write. Your automations answer once they do.
           </span>
         </label>
         <div className="flex flex-wrap items-center gap-2">
@@ -198,9 +198,9 @@ function Setup({ data, onSaved }: { data: Webchat; onSaved: (d: Webchat) => void
           <Icon icon={ChatCircleDots} size={22} /> What answers visitors
         </h2>
         <p className="text-[14px]">
-          Your flows’ <b>welcome</b>, <b>keyword</b> and <b>default reply</b> triggers work here
-          just like on Instagram. Visitors stay anonymous until a flow asks their name or email (an{' '}
-          <b>Ask</b> step), and you can reply from the{' '}
+          Your automations’ <b>welcome</b>, <b>keyword</b> and <b>default reply</b> triggers work
+          here just like on Instagram. Visitors stay anonymous until an automation asks their name
+          or email (an <b>Ask</b> step), and you can reply from the{' '}
           <Link to="/inbox?channel=webchat">Inbox</Link> any time: they see it in the chat, now or
           when they’re back.
         </p>
