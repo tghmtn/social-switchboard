@@ -72,6 +72,7 @@ export type SimMessage = {
         payload?: string;
         ref?: string;
         comment?: { id: string; mediaId?: string };
+        story?: InboundStory;
       }
     | {
         kind: 'out';
@@ -267,6 +268,8 @@ type MessagePart =
   | { type: 'text'; text: string }
   | { type: 'image'; url: string }
   | { type: 'file'; url: string; name: string };
+/** A reply to one of your stories, or a mention in theirs. Instagram's link expires after a while. */
+export type InboundStory = { kind: 'reply' | 'mention'; id?: string; url?: string };
 export type InboxMessageContent =
   | {
       kind: 'in';
@@ -274,6 +277,7 @@ export type InboxMessageContent =
       payload?: string;
       ref?: string;
       comment?: { id: string; mediaId?: string };
+      story?: InboundStory;
     }
   | {
       kind: 'out';

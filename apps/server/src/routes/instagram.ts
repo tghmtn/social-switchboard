@@ -593,6 +593,26 @@ export const instagramRoutes =
       }
     });
 
+    /** Stories from the last 24 hours, for picking which one a story reply trigger watches. */
+    app.get('/instagram/stories', async (req, reply) => {
+      const { workspace } = who(req);
+      const account = await accountFor(db, workspace.id, null);
+      const token = account ? decryptOptional(config.appSecret, account.accessTokenEnc) : undefined;
+      if (!account || !token) return reply.code(409).send({ error: 'not_connected' });
+      try {
+        const stories = await graph.recentStories(
+          token,
+          account.apiHost === 'facebook' ? 'facebook' : 'instagram',
+          account.igUserId,
+        );
+        return { media: stories.map(postSummary) };
+      } catch (err) {
+        return reply.code(502).send({
+          error: err instanceof graph.MetaError ? err.friendly : 'Instagram didn’t answer.',
+        });
+      }
+    });
+
     /** Particular posts by id, however old: thumbnails for the automations list. */
     app.get('/instagram/media/lookup', async (req, reply) => {
       const { workspace } = who(req);

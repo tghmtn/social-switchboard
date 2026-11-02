@@ -94,7 +94,7 @@ export const simulatorRoutes =
 
     const send = async (
       req: Parameters<typeof who>[0],
-      input: Pick<Inbound, 'text' | 'payload' | 'ref'>,
+      input: Pick<Inbound, 'text' | 'payload' | 'ref' | 'story'>,
     ) => {
       const { user, workspace } = who(req);
       await receive(runtime, {
@@ -145,6 +145,15 @@ export const simulatorRoutes =
       });
       return state(workspace.id, user);
     });
+
+    /** Simulates replying to one of your stories. */
+    app.post('/simulator/story-reply', async (req) => {
+      const { text } = z.object({ text: z.string().trim().min(1).max(2000) }).parse(req.body);
+      return send(req, { text, story: { kind: 'reply' } });
+    });
+
+    /** Simulates someone mentioning you in their story. */
+    app.post('/simulator/story-mention', async (req) => send(req, { story: { kind: 'mention' } }));
 
     /** Simulates opening an entry link like ig.me/m/you?ref=spring. */
     app.post('/simulator/open-link', async (req) => {

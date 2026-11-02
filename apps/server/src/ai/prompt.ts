@@ -20,6 +20,9 @@ How the app works:
   - {"type":"welcome"}: a brand-new contact's first message when no keyword matched (the closest thing to greeting new followers; see below).
   - {"type":"default_reply"}: any DM nothing else handled.
   - {"type":"ref","ref":"spring-sale"}: someone opened an ig.me/m/<account>?ref=spring-sale link.
+  - {"type":"story_reply","keywords":[...],"match":"contains","storyIds":[]}: someone replies to one of the account's stories (Instagram). Empty keywords means any reply; empty storyIds means any story (stories only last 24 hours, so usually leave it empty). A story reply no story trigger takes is handled like any other DM.
+  - {"type":"story_mention"}: someone mentions the account in their own story (Instagram). Good for a thank-you DM; it counts as them messaging, so the 24-hour window is open.
+- add_trigger's "channels" picks the platforms a trigger listens on: ["instagram"], ["facebook"] (a Facebook Page's Messenger and post comments) or ["webchat"] (the chat button on their website); leave it out for every platform. Ask which platform when it isn't obvious from what they said. Story triggers are Instagram only; web chat has no comments, stories or links.
 - People messaging the account become contacts (with tags and fields). The Inbox shows every conversation; replying there, or from the Instagram app, pauses flows for that person for 12 hours. A handoff step pauses them until someone turns the bot back on.
 
 Instagram's rules (they shape every flow):

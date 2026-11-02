@@ -16,6 +16,7 @@ import {
   contacts,
   flows,
   flowVersions,
+  type InboundStory,
   messages,
   runSteps,
   runs,
@@ -83,6 +84,8 @@ export type Inbound = {
   payload?: string;
   /** Entry-link ref, e.g. from ig.me/m/you?ref=spring. */
   ref?: string;
+  /** A reply to one of our stories, or a mention of us in theirs (Instagram). */
+  story?: InboundStory;
   /** Which of our connected accounts this arrived on (e.g. the Instagram account id). */
   accountRef?: string;
 };
@@ -173,7 +176,13 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
       channel: input.channel,
       direction: 'in',
       status: 'received',
-      content: { kind: 'in', text: input.text, payload: input.payload, ref: input.ref },
+      content: {
+        kind: 'in',
+        text: input.text,
+        payload: input.payload,
+        ref: input.ref,
+        ...(input.story ? { story: input.story } : {}),
+      },
     });
     // A person has taken over this conversation: record the message, but don't automate.
     if (contact?.pausedAt) {
@@ -379,17 +388,20 @@ async function route(ctx: Ctx, input: Inbound, isNew: boolean) {
     channel: ctx.channel,
     text: input.text,
     ref: input.ref,
+    story: input.story,
     isNewContact: isNew,
   });
   if (!trigger?.versionId) {
     // Nothing answers this one: someone should see it.
-    if (input.text !== undefined)
+    const text =
+      input.text ?? (input.story?.kind === 'mention' ? 'Mentioned you in their story' : undefined);
+    if (text !== undefined)
       ctx.notices.push({
         workspaceId: ctx.workspaceId,
         contactId: ctx.contactId,
         channel: ctx.channel,
         kind: 'unanswered',
-        text: input.text,
+        text,
       });
     return;
   }

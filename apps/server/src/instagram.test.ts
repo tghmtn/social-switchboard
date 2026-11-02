@@ -742,6 +742,88 @@ describe.skipIf(!databaseUrl)('Instagram end to end (fake Meta)', () => {
     expect(again.body.identities[0]).toMatchObject({ followsUs: false });
   });
 
+  it('answers story replies and story mentions with their own triggers', async () => {
+    await connect();
+    const make = async (name: string, text: string, config: object) => {
+      const { body } = await call<{ flow: { id: string } }>('POST', '/api/flows', {
+        name,
+        starter: 'blank',
+      });
+      await call('PUT', `/api/flows/${body.flow.id}/draft`, {
+        graph: {
+          nodes: [
+            { id: 'start', type: 'start' },
+            { id: 'a', type: 'message', data: { parts: [{ type: 'text', text }] } },
+          ],
+          edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'a' }],
+        },
+      });
+      await call('POST', `/api/flows/${body.flow.id}/publish`, {});
+      // Asked for on Facebook, but stories are Instagram's, so it listens there regardless.
+      const made = await call<{ trigger: { channels: string[] | null } }>('POST', '/api/triggers', {
+        flowId: body.flow.id,
+        config,
+        channels: ['facebook'],
+      });
+      return made.body.trigger;
+    };
+    expect(await make('Story', 'Thanks for the reply!', { type: 'story_reply' })).toMatchObject({
+      channels: ['instagram'],
+    });
+    await make('Mention', 'Thanks for the shout-out!', { type: 'story_mention' });
+    const dm = (mid: string, message: object) => ({
+      object: 'instagram',
+      entry: [
+        {
+          id: IG_ID,
+          messaging: [
+            { sender: { id: 'fan-igsid' }, recipient: { id: IG_ID }, message: { mid, ...message } },
+          ],
+        },
+      ],
+    });
+
+    calls = [];
+    await webhook(
+      dm('in-1', {
+        text: 'love this 😍',
+        reply_to: { mid: 'x', story: { id: 'story-1', url: 'https://cdn.example.test/story-1' } },
+      }),
+    );
+    await settled();
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0]?.body).toMatchObject({ message: { text: 'Thanks for the reply!' } });
+
+    // A mention has no words, just the story it's in.
+    calls = [];
+    await webhook(
+      dm('in-2', {
+        attachments: [
+          { type: 'story_mention', payload: { url: 'https://cdn.example.test/theirs' } },
+        ],
+      }),
+    );
+    await settled();
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0]?.body).toMatchObject({ message: { text: 'Thanks for the shout-out!' } });
+
+    const inbox = await call<{ conversations: { last: { text: string } }[] }>('GET', '/api/inbox');
+    expect(inbox.body.conversations[0]?.last.text).toBe('Thanks for the shout-out!');
+    type Detail = { messages: { content: { story?: object } }[] };
+    const conversation = await call<{ conversations: { contactId: string }[] }>(
+      'GET',
+      '/api/inbox',
+    );
+    const detail = await call<Detail>(
+      'GET',
+      `/api/inbox/${conversation.body.conversations[0]?.contactId}`,
+    );
+    expect(detail.body.messages.map((m) => m.content.story).filter(Boolean)).toEqual([
+      { kind: 'reply', id: 'story-1', url: 'https://cdn.example.test/story-1' },
+      { kind: 'mention', url: 'https://cdn.example.test/theirs' },
+    ]);
+  });
+
   it('pauses automation when someone replies from the Instagram app', async () => {
     setEchoGraceMs(0);
     await connect();

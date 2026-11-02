@@ -182,6 +182,11 @@ export const TOOLS: Tool[] = [
       properties: {
         flowId: id('The flow id'),
         config: { type: 'object', description: 'The trigger, as in the instructions.' },
+        channels: {
+          type: 'array',
+          items: { type: 'string', enum: ['instagram', 'facebook', 'webchat'] },
+          description: 'Which platforms it listens on. Leave it out for every platform.',
+        },
       },
       required: ['flowId', 'config'],
     },
@@ -239,7 +244,14 @@ const inputs = {
     name: z.string().trim().min(1).max(100).optional(),
     graph: z.object({ nodes: z.array(z.unknown()), edges: z.array(z.unknown()) }),
   }),
-  add_trigger: z.object({ flowId: z.string().min(1), config: z.record(z.string(), z.unknown()) }),
+  add_trigger: z.object({
+    flowId: z.string().min(1),
+    config: z.record(z.string(), z.unknown()),
+    channels: z
+      .array(z.enum(['instagram', 'facebook', 'webchat']))
+      .min(1)
+      .optional(),
+  }),
   set_trigger_enabled: z.object({ triggerId: z.string().min(1), enabled: z.boolean() }),
   publish_flow: z.object({ flowId: z.string().min(1) }),
 };
@@ -364,6 +376,12 @@ export function describeTrigger(c: Record<string, unknown>): string {
       return 'When a DM matches nothing else';
     case 'ref':
       return `When someone opens a link with ref=${String(c.ref)}`;
+    case 'story_reply': {
+      const stories = (c.storyIds as string[] | undefined)?.length ?? 0;
+      return `When someone replies ${words === 'any message' ? 'anything' : words} to ${stories ? `${stories} stor${stories === 1 ? 'y' : 'ies'}` : 'any story'}`;
+    }
+    case 'story_mention':
+      return 'When someone mentions you in their story';
     default:
       return String(c.type);
   }
@@ -587,7 +605,11 @@ async function runTool(
     case 'add_trigger': {
       const input = parse(inputs.add_trigger);
       if (!input) return badInput;
-      const r = await api('POST', '/api/triggers', { flowId: input.flowId, config: input.config });
+      const r = await api('POST', '/api/triggers', {
+        flowId: input.flowId,
+        config: input.config,
+        channels: input.channels ?? null,
+      });
       return r.status < 300
         ? ok(
             { triggerId: (r.body as { trigger: { id: string } }).trigger.id },

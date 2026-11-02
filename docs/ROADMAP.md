@@ -183,7 +183,7 @@ Each phase ends with something you can actually use.
   - optional public reply, with randomized variants
   - private reply that opens the DM
   - DM keyword
-  - story reply and story mention
+  - story reply and story mention (done 2026-11-01)
   - ig.me ref links
   - live comments (nice-to-have)
 - **Outbound:** text, quick replies, buttons/cards, images, PDFs. Links go through a tracked redirect to measure clicks.
@@ -388,3 +388,5 @@ The Welcome message starter is now the **New follower greeting** (2026-11-01). I
 Automations can be **duplicated** from the list (2026-11-01): the copy is an unpublished draft with the same steps and triggers, its triggers placed after everyone else's so the original keeps answering. The builder warns when a trigger answers the same keyword (or first messages, default replies, a ref link, any comment) as one in another live automation, since only one runs, and keywords can now be changed in place.
 
 The automations list can also **switch a live automation off** and **delete** one (2026-11-01). Off keeps it published but it answers nothing: triggers, "go to" steps and taps on its old buttons all stop, and conversations in the middle of it end; publishing switches it back on. Taps on a deleted automation's old buttons stop too (before, they carried on). A tile shows the picture of the post its comment trigger watches (+N for more), looked up by id so older posts work, cached for 30 minutes.
+
+**Story triggers and platforms** (2026-11-01): a **Story reply** trigger (any reply or keywords, any story or picked ones from the last 24 hours) and a **Story mention** trigger, both Instagram only. A story reply no story trigger takes still counts as a DM. Adding a trigger now starts with its **platform** (Instagram, Facebook, Website chat, or every platform), which narrows the trigger types offered and saves as its channels; Test chat stands in for every platform, and has a Story reply mode and a "Mention you in a story" button. The Inbox labels story replies and mentions, with a link to the story while Instagram keeps it.

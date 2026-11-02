@@ -572,6 +572,17 @@ export async function mediaById(token: string, host: Host, id: string): Promise<
   return call<Media>(await http(url, { headers: bearer(token) }));
 }
 
+/** The account's stories from the last 24 hours (Instagram keeps none older for apps). */
+export async function recentStories(
+  token: string,
+  host: Host,
+  igUserId?: string,
+): Promise<Media[]> {
+  const url = new URL(`${base(host)}/${host === 'facebook' && igUserId ? igUserId : 'me'}/stories`);
+  url.searchParams.set('fields', MEDIA_FIELDS);
+  return (await call<{ data: Media[] }>(await http(url, { headers: bearer(token) }))).data;
+}
+
 /**
  * Recent posts, newest first; `after` (from the previous page) gets older ones. With Unified
  * login `/me` is the system user, so ask the account itself.

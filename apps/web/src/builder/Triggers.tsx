@@ -9,6 +9,8 @@ const MATCH_TEXT = { exact: '', contains: ' (anywhere)', starts_with: ' (starts 
 export const TRIGGER_TYPES: Record<TriggerConfig['type'], string> = {
   comment: 'Comment on a post',
   keyword: 'DM keyword',
+  story_reply: 'Story reply',
+  story_mention: 'Story mention',
   welcome: 'First message',
   default_reply: 'Default reply',
   ref: 'Entry link',
@@ -18,10 +20,48 @@ export const TRIGGER_TYPES: Record<TriggerConfig['type'], string> = {
 const WHEN: Record<TriggerConfig['type'], string> = {
   comment: 'comments on a post',
   keyword: 'sends a DM with a keyword',
+  story_reply: 'replies to your story',
+  story_mention: 'mentions you in their story',
   welcome: 'messages you for the first time',
   default_reply: 'sends a DM nothing else answers',
   ref: 'opens an entry link',
 };
+
+/** Where a trigger listens, saved as its channels ("all" saves none: every platform). */
+type Platform = 'instagram' | 'facebook' | 'webchat' | 'all';
+const PLATFORMS: Record<Platform, string> = {
+  instagram: 'Instagram',
+  facebook: 'Facebook',
+  webchat: 'Website chat',
+  all: 'Every platform',
+};
+/** What can start an automation on each platform. */
+const TYPES_ON: Record<Platform, TriggerConfig['type'][]> = {
+  instagram: [
+    'comment',
+    'keyword',
+    'story_reply',
+    'story_mention',
+    'welcome',
+    'default_reply',
+    'ref',
+  ],
+  facebook: ['comment', 'keyword', 'welcome', 'default_reply', 'ref'],
+  webchat: ['keyword', 'welcome', 'default_reply'],
+  all: ['keyword', 'comment', 'welcome', 'default_reply', 'ref'],
+};
+const channelsFor = (p: Platform) => (p === 'all' ? null : [p]);
+/** The platforms a trigger of this type can listen on. */
+const platformsFor = (type: TriggerConfig['type']) =>
+  (Object.keys(TYPES_ON) as Platform[]).filter((p) => TYPES_ON[p].includes(type));
+const platformOf = (channels: string[] | null): Platform =>
+  channels?.length === 1 && channels[0] && channels[0] in PLATFORMS && channels[0] !== 'all'
+    ? (channels[0] as Platform)
+    : 'all';
+const platformText = (channels: string[] | null) =>
+  channels?.length
+    ? channels.map((c) => (c in PLATFORMS ? PLATFORMS[c as Platform] : c)).join(' and ')
+    : PLATFORMS.all;
 
 const MATCH_LABEL = {
   exact: 'the whole message',
@@ -48,6 +88,17 @@ export function triggerText(c: TriggerConfig): string {
         : 'on any post';
       return `Comment: ${words} ${where}`;
     }
+    case 'story_reply': {
+      const words = c.keywords.length
+        ? `“${c.keywords.join('”, “')}”${MATCH_TEXT[c.match]}`
+        : 'any reply';
+      const where = c.storyIds.length
+        ? `to ${c.storyIds.length} stor${c.storyIds.length === 1 ? 'y' : 'ies'}`
+        : 'to any story';
+      return `Story reply: ${words} ${where}`;
+    }
+    case 'story_mention':
+      return 'Mentioned in their story';
   }
 }
 
@@ -64,7 +115,7 @@ function KeywordsRow({
   onChange,
 }: {
   id: string;
-  config: Extract<TriggerConfig, { type: 'keyword' | 'comment' }>;
+  config: Extract<TriggerConfig, { type: 'keyword' | 'comment' | 'story_reply' }>;
   onChange: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -96,7 +147,13 @@ function KeywordsRow({
               className="input"
               aria-label="Keywords, separated by commas"
               defaultValue={config.keywords.join(', ')}
-              placeholder={config.type === 'comment' ? 'Empty: any comment' : 'WORKSHOP'}
+              placeholder={
+                config.type === 'comment'
+                  ? 'Empty: any comment'
+                  : config.type === 'story_reply'
+                    ? 'Empty: any reply'
+                    : 'WORKSHOP'
+              }
               // biome-ignore lint/a11y/noAutofocus: opened by the Change button just pressed
               autoFocus
             />
@@ -124,6 +181,8 @@ function KeywordsRow({
                 <b>{config.keywords.join(', ')}</b>{' '}
                 <span className="text-muted">({MATCH_LABEL[config.match]})</span>
               </>
+            ) : config.type === 'story_reply' ? (
+              'Any reply'
             ) : (
               'Any comment'
             )}{' '}
@@ -137,8 +196,12 @@ function KeywordsRow({
   );
 }
 
-/** Asked of the post picker: what's picked now, and what to do with the new choice. */
-type PostRequest = { selected: string[]; onDone: (ids: string[]) => void | Promise<void> };
+/** Asked of the post picker: posts or stories, what's picked now, and what to do with the choice. */
+type PostRequest = {
+  kind: 'posts' | 'stories';
+  selected: string[];
+  onDone: (ids: string[]) => void | Promise<void>;
+};
 
 /** Shown when the start step is selected: what starts this automation. */
 export function TriggersEditor({
@@ -152,15 +215,27 @@ export function TriggersEditor({
   published: boolean;
   onChange: () => void;
 }) {
-  const posts = useRecentPosts();
+  const posts = useRecentPosts('/instagram/media');
+  const [platform, setPlatform] = useState<Platform>('instagram');
+  const [type, setType] = useState<TriggerConfig['type']>('comment');
+  // Stories are only asked for when a story trigger needs them (each look asks Instagram).
+  const stories = useRecentPosts(
+    '/instagram/stories',
+    type === 'story_reply' || triggers.some((t) => t.config.type === 'story_reply'),
+  );
   // Live triggers elsewhere, to warn when one here answers the same thing.
   const all = useApi<{ triggers: Trigger[] }>('/triggers');
   const others = (all.data?.triggers ?? []).filter(
     (o) => o.flowId !== flowId && o.enabled && o.flowPublished,
   );
-  const [type, setType] = useState<TriggerConfig['type']>('comment');
   const [error, setError] = useState<string>();
   const [picked, setPicked] = useState<string[]>([]);
+  const [pickedStories, setPickedStories] = useState<string[]>([]);
+
+  function choosePlatform(p: Platform) {
+    setPlatform(p);
+    if (!TYPES_ON[p].includes(type)) setType(TYPES_ON[p][0] ?? 'keyword');
+  }
   const [choosing, setChoosing] = useState<PostRequest>();
 
   async function add(e: FormEvent<HTMLFormElement>) {
@@ -185,14 +260,23 @@ export function TriggersEditor({
           publicReplies: splitList(form.get('publicReplies'), /\n/),
         };
         break;
+      case 'story_reply':
+        config = {
+          type,
+          keywords: splitList(form.get('keywords'), /,/),
+          match,
+          storyIds: pickedStories,
+        };
+        break;
       default:
         config = { type };
     }
     setError(undefined);
     try {
-      await api('/triggers', { flowId, config });
+      await api('/triggers', { flowId, config, channels: channelsFor(platform) });
       formEl.reset();
       setPicked([]);
+      setPickedStories([]);
       onChange();
     } catch (err) {
       setError(
@@ -224,6 +308,10 @@ export function TriggersEditor({
             <div key={t.id} className="grid gap-2 border-2 border-line p-3">
               <div className="flex items-center gap-3">
                 <p className="min-w-0 flex-1 font-bold">{TRIGGER_TYPES[c.type]}</p>
+                {/* Where there's a choice, the Platform row below shows it instead. */}
+                {platformsFor(c.type).length === 1 && (
+                  <span className="chip">{platformText(t.channels)}</span>
+                )}
                 <Toggle
                   on={t.enabled}
                   label={`Turn ${t.enabled ? 'off' : 'on'} trigger ${triggerText(c)}`}
@@ -244,6 +332,69 @@ export function TriggersEditor({
                 </button>
               </div>
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[14px]">
+                {platformsFor(c.type).length > 1 && (
+                  <>
+                    <dt className="text-muted">
+                      <label htmlFor={`platform-${t.id}`}>Platform</label>
+                    </dt>
+                    <dd>
+                      <select
+                        id={`platform-${t.id}`}
+                        className="input w-auto py-1 text-[14px]"
+                        value={platformOf(t.channels)}
+                        onChange={async (e) => {
+                          await api(
+                            `/triggers/${t.id}`,
+                            { channels: channelsFor(e.target.value as Platform) },
+                            'PATCH',
+                          );
+                          onChange();
+                        }}
+                      >
+                        {platformsFor(c.type).map((p) => (
+                          <option key={p} value={p}>
+                            {PLATFORMS[p]}
+                          </option>
+                        ))}
+                      </select>
+                    </dd>
+                  </>
+                )}
+                {c.type === 'story_reply' && (
+                  <>
+                    <dt className="text-muted">Stories</dt>
+                    <dd className="flex flex-wrap items-center gap-2">
+                      <PostStrip
+                        ids={c.storyIds}
+                        posts={stories.items}
+                        every="Every story"
+                        missing="Ended story"
+                      />
+                      {stories.state !== 'not_connected' && (
+                        <button
+                          type="button"
+                          className="linkbtn text-[13px]"
+                          onClick={() =>
+                            setChoosing({
+                              kind: 'stories',
+                              selected: c.storyIds,
+                              onDone: async (ids) => {
+                                await api(
+                                  `/triggers/${t.id}`,
+                                  { config: { ...c, storyIds: ids } },
+                                  'PATCH',
+                                );
+                                onChange();
+                              },
+                            })
+                          }
+                        >
+                          {c.storyIds.length ? 'Change' : 'Pick stories'}
+                        </button>
+                      )}
+                    </dd>
+                  </>
+                )}
                 {c.type === 'comment' && (
                   <>
                     <dt className="text-muted">Posts</dt>
@@ -255,6 +406,7 @@ export function TriggersEditor({
                           className="linkbtn text-[13px]"
                           onClick={() =>
                             setChoosing({
+                              kind: 'posts',
                               selected: c.mediaIds,
                               onDone: async (ids) => {
                                 await api(
@@ -273,7 +425,7 @@ export function TriggersEditor({
                     </dd>
                   </>
                 )}
-                {(c.type === 'comment' || c.type === 'keyword') && (
+                {(c.type === 'comment' || c.type === 'keyword' || c.type === 'story_reply') && (
                   <KeywordsRow id={t.id} config={c} onChange={onChange} />
                 )}
                 {c.type === 'comment' && c.publicReplies.length > 0 && (
@@ -316,18 +468,32 @@ export function TriggersEditor({
       <form onSubmit={add} className="grid gap-3 border-t-2 border-line pt-4">
         <h3 className="font-bold">Add a trigger</h3>
         <Select
+          label="Platform"
+          value={platform}
+          onChange={(e) => choosePlatform(e.target.value as Platform)}
+        >
+          {(Object.keys(PLATFORMS) as Platform[]).map((p) => (
+            <option key={p} value={p}>
+              {PLATFORMS[p]}
+            </option>
+          ))}
+        </Select>
+        <Select
           label="When someone…"
           value={type}
           onChange={(e) => setType(e.target.value as TriggerConfig['type'])}
         >
-          {(Object.keys(WHEN) as TriggerConfig['type'][]).map((k) => (
+          {TYPES_ON[platform].map((k) => (
             <option key={k} value={k}>
               {WHEN[k]}
             </option>
           ))}
         </Select>
 
-        {type === 'comment' && (
+        {type === 'comment' && platform === 'facebook' && (
+          <p className="text-[13px] text-muted">Answers comments on any of the Page’s posts.</p>
+        )}
+        {type === 'comment' && platform !== 'facebook' && (
           <fieldset className="grid gap-2">
             <legend className="mb-1 text-sm font-bold">On which posts</legend>
             {posts.state === 'not_connected' ? (
@@ -341,7 +507,9 @@ export function TriggersEditor({
                 <button
                   type="button"
                   className="btn btn-sm"
-                  onClick={() => setChoosing({ selected: picked, onDone: setPicked })}
+                  onClick={() =>
+                    setChoosing({ kind: 'posts', selected: picked, onDone: setPicked })
+                  }
                 >
                   {picked.length ? 'Change posts' : 'Pick posts'}
                 </button>
@@ -350,24 +518,62 @@ export function TriggersEditor({
           </fieldset>
         )}
 
-        {(type === 'keyword' || type === 'comment') && (
+        {type === 'story_reply' && (
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-bold">On which stories</legend>
+            {stories.state === 'not_connected' ? (
+              <p className="text-[13px] text-muted">
+                Every story. <Link to="/channels/instagram">Connect Instagram</Link> to pick
+                specific ones.
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <PostStrip ids={pickedStories} posts={stories.items} every="Every story" />
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() =>
+                    setChoosing({
+                      kind: 'stories',
+                      selected: pickedStories,
+                      onDone: setPickedStories,
+                    })
+                  }
+                >
+                  {pickedStories.length ? 'Change stories' : 'Pick stories'}
+                </button>
+              </div>
+            )}
+          </fieldset>
+        )}
+
+        {type === 'story_mention' && (
+          <p className="border-2 border-line bg-surface-2 px-3 py-2 text-[13px]">
+            Fires when someone tags you in their own story. That counts as them messaging you, so
+            the automation can DM them back, like a thank-you with a link.
+          </p>
+        )}
+
+        {(type === 'keyword' || type === 'comment' || type === 'story_reply') && (
           <>
             <Field
-              label={type === 'comment' ? 'With these keywords (optional)' : 'Keywords'}
+              label={type === 'keyword' ? 'Keywords' : 'With these keywords (optional)'}
               name="keywords"
               required={type === 'keyword'}
               placeholder="WORKSHOP, workshop info"
               hint={
                 type === 'comment'
                   ? 'Leave empty to answer every comment. Separate several with commas.'
-                  : 'Separate several with commas. Case and punctuation don’t matter.'
+                  : type === 'story_reply'
+                    ? 'Leave empty to answer every reply. Separate several with commas.'
+                    : 'Separate several with commas. Case and punctuation don’t matter.'
               }
             />
             <Select
               key={type}
               label="Match"
               name="match"
-              defaultValue={type === 'comment' ? 'contains' : 'exact'}
+              defaultValue={type === 'keyword' ? 'exact' : 'contains'}
             >
               <option value="exact">The whole message</option>
               <option value="contains">Anywhere, as a whole word</option>
@@ -399,7 +605,13 @@ export function TriggersEditor({
             name="ref"
             required
             placeholder="spring-sale"
-            hint="ig.me/m/you?ref=spring-sale"
+            hint={
+              platform === 'facebook'
+                ? 'm.me/yourpage?ref=spring-sale'
+                : platform === 'instagram'
+                  ? 'ig.me/m/you?ref=spring-sale'
+                  : 'ig.me/m/you?ref=spring-sale or m.me/yourpage?ref=spring-sale'
+            }
           />
         )}
         <button type="submit" className="btn w-fit">
@@ -408,38 +620,45 @@ export function TriggersEditor({
         <FormError message={error} />
       </form>
 
-      <PostDialog request={choosing} posts={posts} onClose={() => setChoosing(undefined)} />
+      <PostDialog
+        request={choosing}
+        posts={choosing?.kind === 'stories' ? stories : posts}
+        onClose={() => setChoosing(undefined)}
+      />
     </div>
   );
 }
 
-/** The account's posts, newest first, a page at a time. */
-function useRecentPosts() {
+/** The account's posts (or stories), newest first, a page at a time, once `wanted`. */
+function useRecentPosts(path: '/instagram/media' | '/instagram/stories', wanted = true) {
   const [items, setItems] = useState<InstagramMedia[]>([]);
   const [after, setAfter] = useState<string>();
   const [state, setState] = useState<'loading' | 'ready' | 'not_connected' | 'error'>('loading');
   const [error, setError] = useState<string>();
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const load = useCallback(async (cursor?: string) => {
-    try {
-      const page = await api<{ media: InstagramMedia[]; after?: string }>(
-        `/instagram/media${cursor ? `?${new URLSearchParams({ after: cursor })}` : ''}`,
-      );
-      setItems((prev) => (cursor ? [...prev, ...page.media] : page.media));
-      setAfter(page.after);
-      setState('ready');
-      setError(undefined);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) return setState('not_connected');
-      setError(err instanceof Error ? err.message : String(err));
-      if (!cursor) setState('error');
-    }
-  }, []);
+  const load = useCallback(
+    async (cursor?: string) => {
+      try {
+        const page = await api<{ media: InstagramMedia[]; after?: string }>(
+          `${path}${cursor ? `?${new URLSearchParams({ after: cursor })}` : ''}`,
+        );
+        setItems((prev) => (cursor ? [...prev, ...page.media] : page.media));
+        setAfter(page.after);
+        setState('ready');
+        setError(undefined);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) return setState('not_connected');
+        setError(err instanceof Error ? err.message : String(err));
+        if (!cursor) setState('error');
+      }
+    },
+    [path],
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (wanted) void load();
+  }, [load, wanted]);
 
   async function loadMore() {
     if (!after) return;
@@ -464,7 +683,16 @@ const postDate = (m: InstagramMedia) =>
     : '';
 
 /** One post, whole (never cropped), in a portrait tile like Instagram's grid. */
-export function PostThumb({ post, className = '' }: { post?: InstagramMedia; className?: string }) {
+export function PostThumb({
+  post,
+  className = '',
+  missing = 'Older post',
+}: {
+  post?: InstagramMedia;
+  className?: string;
+  /** Shown when the post isn't among those loaded. */
+  missing?: string;
+}) {
   return (
     <span
       className={`flex aspect-[4/5] items-center justify-center overflow-hidden bg-surface-2 ${className}`}
@@ -479,21 +707,36 @@ export function PostThumb({ post, className = '' }: { post?: InstagramMedia; cla
         />
       ) : (
         <span className="p-1 text-center text-[11px] text-muted">
-          {post ? postKind(post) : 'Older post'}
+          {post ? postKind(post) : missing}
         </span>
       )}
     </span>
   );
 }
 
-/** The posts a comment trigger watches, as small thumbnails. */
-function PostStrip({ ids, posts }: { ids: string[]; posts: InstagramMedia[] }) {
-  if (ids.length === 0) return <span className="text-[13px] text-muted">Every post</span>;
+/** The posts (or stories) a trigger watches, as small thumbnails. */
+function PostStrip({
+  ids,
+  posts,
+  every = 'Every post',
+  missing,
+}: {
+  ids: string[];
+  posts: InstagramMedia[];
+  every?: string;
+  missing?: string;
+}) {
+  if (ids.length === 0) return <span className="text-[13px] text-muted">{every}</span>;
   const byId = new Map(posts.map((p) => [p.id, p]));
   return (
     <span className="flex flex-wrap gap-1.5">
       {ids.map((id) => (
-        <PostThumb key={id} post={byId.get(id)} className="w-12 border-2 border-line" />
+        <PostThumb
+          key={id}
+          post={byId.get(id)}
+          missing={missing}
+          className="w-12 border-2 border-line"
+        />
       ))}
     </span>
   );
@@ -511,6 +754,7 @@ function PostDialog({
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const stories = request?.kind === 'stories';
   useEffect(() => {
     if (request) setSelected(request.selected);
   }, [request]);
@@ -528,13 +772,26 @@ function PostDialog({
   }
 
   return (
-    <Dialog open={Boolean(request)} onClose={onClose} title="Which posts?">
+    <Dialog
+      open={Boolean(request)}
+      onClose={onClose}
+      title={stories ? 'Which stories?' : 'Which posts?'}
+    >
       <div className="grid gap-4">
         <p className="text-[14px] text-muted">
-          Pick the posts this trigger watches. Pick none to watch every post, including new ones.
+          {stories
+            ? 'Pick the stories this trigger watches. Instagram only shows stories from the last 24 hours, and a picked story stops getting replies once it ends. Pick none to answer replies to every story, including new ones.'
+            : 'Pick the posts this trigger watches. Pick none to watch every post, including new ones.'}
         </p>
-        {posts.state === 'loading' && <p className="text-[14px]">Loading your posts…</p>}
-        {posts.error && <FormError message={`Couldn’t load posts: ${posts.error}`} />}
+        {posts.state === 'loading' && (
+          <p className="text-[14px]">{stories ? 'Loading your stories…' : 'Loading your posts…'}</p>
+        )}
+        {posts.error && (
+          <FormError message={`Couldn’t load ${stories ? 'stories' : 'posts'}: ${posts.error}`} />
+        )}
+        {stories && posts.state === 'ready' && posts.items.length === 0 && (
+          <p className="text-[14px]">No stories in the last 24 hours.</p>
+        )}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {posts.items.map((m) => {
             const on = selected.includes(m.id);
@@ -569,7 +826,11 @@ function PostDialog({
       </div>
       <div className="sticky bottom-0 -mx-5 -mb-5 mt-4 flex flex-wrap items-center justify-between gap-3 border-t-2 border-edge bg-surface px-5 py-3">
         <span className="text-[14px] font-bold">
-          {selected.length === 0 ? 'Every post' : `${selected.length} picked`}
+          {selected.length === 0
+            ? stories
+              ? 'Every story'
+              : 'Every post'
+            : `${selected.length} picked`}
         </span>
         <div className="flex gap-2">
           {selected.length > 0 && (

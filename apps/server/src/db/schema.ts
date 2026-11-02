@@ -475,7 +475,11 @@ export type InboundContent = {
   ref?: string;
   /** Set when this was a public comment rather than a DM. Comments don't open the DM window. */
   comment?: { id: string; mediaId?: string };
+  /** A reply to one of our stories, or a mention of us in theirs. */
+  story?: InboundStory;
 };
+/** Instagram's story link expires after a while, so it may no longer open. */
+export type InboundStory = { kind: 'reply' | 'mention'; id?: string; url?: string };
 /** `payloads` maps each quick reply / flow button id to the opaque payload the channel echoes back. */
 export type OutboundContent = {
   kind: 'out';

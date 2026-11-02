@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { instagramAccounts, webhookEvents } from '../db/schema';
+import { type InboundStory, instagramAccounts, webhookEvents } from '../db/schema';
 import { handlePage, type PagePayload } from '../facebook/events';
 import { type RuntimeDeps, receive, receiveComment } from '../runtime/runtime';
 import { userProfile } from './graph';
@@ -31,6 +31,10 @@ type Entry = {
       is_echo?: boolean;
       is_deleted?: boolean;
       quick_reply?: { payload?: string };
+      /** Set when this is a reply to one of the account's stories. */
+      reply_to?: { mid?: string; story?: { id?: string; url?: string } };
+      /** A mention in their story comes as a story_mention attachment, with no text. */
+      attachments?: { type?: string; payload?: { url?: string } }[];
     };
     postback?: { title?: string; payload?: string };
     referral?: { ref?: string };
@@ -147,6 +151,13 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
       const text = m.message?.text ?? m.postback?.title;
       const payloadValue = m.message?.quick_reply?.payload ?? m.postback?.payload;
       const ref = m.referral?.ref;
+      const replied = m.message?.reply_to?.story;
+      const mention = m.message?.attachments?.find((a) => a.type === 'story_mention');
+      const story: InboundStory | undefined = replied
+        ? { kind: 'reply', id: replied.id, url: replied.url }
+        : mention
+          ? { kind: 'mention', url: mention.payload?.url }
+          : undefined;
       if (text === undefined && payloadValue === undefined && ref === undefined && !m.message)
         continue;
       // They've messaged us, so Instagram will share their profile. It goes in before the flow
@@ -160,6 +171,7 @@ async function handle(deps: { db: Db; runtime: RuntimeDeps; appSecret: string },
         text,
         payload: payloadValue,
         ref,
+        story,
       });
       if (profile) {
         if (!known) await saveProfile(deps.db, account.workspaceId, sender, profile);

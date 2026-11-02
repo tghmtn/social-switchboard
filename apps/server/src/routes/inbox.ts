@@ -59,11 +59,15 @@ function preview(content: unknown): string {
     text?: string;
     ref?: string;
     comment?: unknown;
+    story?: { kind?: string };
     message?: { parts?: { type: string; text?: string; name?: string }[] };
     publicReplyTo?: string;
   };
   if (c.kind === 'in') {
     if (c.comment) return `Commented: ${c.text ?? ''}`;
+    if (c.story?.kind === 'mention') return 'Mentioned you in their story';
+    if (c.story?.kind === 'reply')
+      return `Replied to your story: ${c.text ?? '(a photo or sticker)'}`;
     return c.text ?? (c.ref ? `Opened a link (${c.ref})` : '(a photo or attachment)');
   }
   const parts = c.message?.parts ?? [];

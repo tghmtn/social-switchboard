@@ -18,6 +18,8 @@ const idParam = z.object({ id: z.uuid() });
 // Name the outer row explicitly inside select-list subqueries (see CONTACT_ID in contacts.ts).
 const FLOW_ID = sql.raw('"flows"."id"');
 const channelList = z.array(z.string().trim().min(1).max(40)).max(20).nullable();
+/** Trigger types only Instagram has, so they listen there whatever platform is asked for. */
+const STORIES = new Set(['story_reply', 'story_mention']);
 
 /** Wiring checks plus the ones that need the database (does the "go to" flow exist?). */
 async function checkFlow(
@@ -377,6 +379,7 @@ export const flowRoutes =
           enabled: z.boolean().default(true),
         })
         .parse(req.body);
+      if (STORIES.has(body.config.type)) body.channels = ['instagram'];
       await ownFlow(workspace.id, body.flowId);
       const [last] = await db
         .select({ n: max(triggers.position) })
@@ -403,6 +406,14 @@ export const flowRoutes =
         .partial()
         .parse(req.body);
       if (body.flowId) await ownFlow(workspace.id, body.flowId);
+      if (body.channels !== undefined || body.config) {
+        const [current] = await db
+          .select({ config: triggers.config })
+          .from(triggers)
+          .where(and(eq(triggers.id, id), eq(triggers.workspaceId, workspace.id)));
+        const type = (body.config ?? current?.config)?.type;
+        if (type && STORIES.has(type)) body.channels = ['instagram'];
+      }
       const [trigger] = await db
         .update(triggers)
         .set({ ...body, updatedAt: new Date() })

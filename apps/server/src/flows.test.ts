@@ -395,6 +395,34 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
     expect(outText(s)).toHaveLength(before);
   });
 
+  it('tries story replies and mentions in Test chat, on Instagram-only triggers', async () => {
+    const make = async (text: string, config: object) => {
+      const id = await createFlow(text, 'blank');
+      await call('PUT', `/api/flows/${id}/draft`, {
+        graph: {
+          nodes: [
+            { id: 'start', type: 'start' },
+            { id: 'm', type: 'message', data: { parts: [{ type: 'text', text }] } },
+          ],
+          edges: [{ id: 'e1', source: 'start', sourceHandle: 'next', target: 'm' }],
+        },
+      });
+      await call('POST', `/api/flows/${id}/publish`);
+      await call('POST', '/api/triggers', { flowId: id, config, channels: ['instagram'] });
+    };
+    await make('Here’s the guide', { type: 'story_reply', keywords: ['guide'] });
+    await make('Thanks for the shout-out!', { type: 'story_mention' });
+
+    let s = (await call<SimState>('POST', '/api/simulator/story-reply', { text: 'guide pls' }))
+      .body;
+    expect(outText(s)).toEqual(['Here’s the guide']);
+    s = (await call<SimState>('POST', '/api/simulator/story-mention', {})).body;
+    expect(outText(s)).toEqual(['Here’s the guide', 'Thanks for the shout-out!']);
+    // A story reply no story trigger takes is just a DM, and nothing here answers that.
+    s = (await call<SimState>('POST', '/api/simulator/story-reply', { text: 'so cute' })).body;
+    expect(outText(s)).toHaveLength(2);
+  });
+
   it('chains into another flow and picks keyword over default reply', async () => {
     const second = await createFlow('Second', 'blank');
     await call('PUT', `/api/flows/${second}/draft`, {

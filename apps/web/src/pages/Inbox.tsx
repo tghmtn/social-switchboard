@@ -571,7 +571,11 @@ function Bubble({ m }: { m: InboxDetail['messages'][number] }) {
     c.kind === 'in'
       ? c.comment
         ? 'Commented on a post'
-        : null
+        : c.story?.kind === 'reply'
+          ? 'Replied to your story'
+          : c.story?.kind === 'mention'
+            ? 'Mentioned you in their story'
+            : null
       : c.publicReplyTo
         ? 'Public reply under their comment'
         : c.privateReplyTo
@@ -591,10 +595,18 @@ function Bubble({ m }: { m: InboxDetail['messages'][number] }) {
         }`}
       >
         {label && <p className="text-[12px] font-bold text-muted">{label}</p>}
+        {c.kind === 'in' && c.story?.url && (
+          // Instagram's link to the story stops working after a while.
+          <a href={c.story.url} target="_blank" rel="noopener noreferrer" className="text-[13px]">
+            See the story
+          </a>
+        )}
         {c.kind === 'in' ? (
-          <p className="whitespace-pre-wrap break-words">
-            {c.text ?? (c.ref ? `Opened a link (ref=${c.ref})` : '(a photo or attachment)')}
-          </p>
+          (c.text !== undefined || c.story?.kind !== 'mention') && (
+            <p className="whitespace-pre-wrap break-words">
+              {c.text ?? (c.ref ? `Opened a link (ref=${c.ref})` : '(a photo or attachment)')}
+            </p>
+          )
         ) : (
           <>
             {c.message.parts.map((p, i) =>

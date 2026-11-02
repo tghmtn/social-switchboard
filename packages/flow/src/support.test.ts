@@ -99,8 +99,58 @@ describe('triggers', () => {
     expect(pick({ channel: 'simulator', text: 'Hi', isNewContact: true })).toBe('kw');
     expect(pick({ channel: 'simulator', text: 'hello', isNewContact: true })).toBe('welcome');
     expect(pick({ channel: 'simulator', text: 'hello', isNewContact: false })).toBe('default');
-    expect(pick({ channel: 'simulator', text: 'promo', isNewContact: false })).toBe('default');
+    expect(pick({ channel: 'facebook', text: 'promo', isNewContact: false })).toBe('default');
     expect(pick({ channel: 'instagram', text: 'promo', isNewContact: false })).toBe('ig-only');
+    // Test chat stands in for every platform, so an Instagram-only trigger answers there too.
+    expect(pick({ channel: 'simulator', text: 'promo', isNewContact: false })).toBe('ig-only');
+  });
+
+  it('answers story mentions and replies, a specific story first', () => {
+    type StoryReply = Extract<TriggerConfig, { type: 'story_reply' }>;
+    const reply = (
+      id: string,
+      over: Partial<StoryReply> = {},
+    ): { id: string; config: TriggerConfig } => {
+      const config: StoryReply = {
+        type: 'story_reply',
+        keywords: [],
+        match: 'contains',
+        storyIds: [],
+        ...over,
+      };
+      return { id, config };
+    };
+    const triggers: { id: string; config: TriggerConfig }[] = [
+      reply('any'),
+      reply('guide', { keywords: ['guide'] }),
+      reply('this-story', { storyIds: ['s1'] }),
+      { id: 'mention', config: { type: 'story_mention' } as const },
+      { id: 'kw', config: kw(['hi'], 'exact') },
+    ];
+    const pick = (event: Parameters<typeof matchTrigger>[1]) => matchTrigger(triggers, event)?.id;
+    const story = (id?: string) => ({ kind: 'reply' as const, id });
+    expect(pick({ channel: 'instagram', story: { kind: 'mention' }, isNewContact: false })).toBe(
+      'mention',
+    );
+    expect(
+      pick({ channel: 'instagram', text: 'wow', story: story('s1'), isNewContact: false }),
+    ).toBe('this-story');
+    // In order: "any reply" comes before the keyword one, so it takes everything.
+    expect(
+      pick({ channel: 'instagram', text: 'guide', story: story('s2'), isNewContact: false }),
+    ).toBe('any');
+    // A sticker or photo reply has no words; only "any reply" triggers take it.
+    expect(pick({ channel: 'instagram', story: story('s2'), isNewContact: false })).toBe('any');
+    // With no story trigger left to take it, a story reply is an ordinary DM.
+    const dmOnly = triggers.filter((t) => t.config.type !== 'story_reply');
+    expect(
+      matchTrigger(dmOnly, {
+        channel: 'instagram',
+        text: 'hi',
+        story: story('s2'),
+        isNewContact: false,
+      })?.id,
+    ).toBe('kw');
   });
 });
 
@@ -165,6 +215,13 @@ describe('triggerOverlap', () => {
     const ig = t({ type: 'welcome' }, ['instagram']);
     expect(triggerOverlap(ig, t({ type: 'welcome' }, ['webchat']))).toBeUndefined();
     expect(triggerOverlap(ig, t({ type: 'welcome' }))).toBe('first messages');
+    const story = (keywords: string[], storyIds: string[] = []) =>
+      t({ type: 'story_reply', keywords, match: 'contains', storyIds });
+    expect(triggerOverlap(story(['guide']), story(['GUIDE']))).toBe('story replies with “guide”');
+    expect(triggerOverlap(story([], ['a']), story([], ['b']))).toBeUndefined();
+    expect(triggerOverlap(t({ type: 'story_mention' }), t({ type: 'story_mention' }))).toBe(
+      'story mentions',
+    );
   });
 });
 

@@ -39,7 +39,8 @@ function waitText(r: SimRun) {
 export function Simulator({ flowId, showState = true }: { flowId?: string; showState?: boolean }) {
   const { data, setData, reload } = useApi<SimState>('/simulator');
   const [text, setText] = useState('');
-  const [asComment, setAsComment] = useState(false);
+  // What typing sends: a DM, a public comment on a post, or a reply to one of your stories.
+  const [mode, setMode] = useState<'dm' | 'comment' | 'story'>('dm');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const bottom = useRef<HTMLDivElement>(null);
@@ -90,7 +91,14 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
     const t = text.trim();
     if (!t) return;
     setText('');
-    void act(asComment ? '/simulator/comment' : '/simulator/send', { text: t });
+    void act(
+      mode === 'comment'
+        ? '/simulator/comment'
+        : mode === 'story'
+          ? '/simulator/story-reply'
+          : '/simulator/send',
+      { text: t },
+    );
   }
 
   return (
@@ -125,6 +133,15 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
             title="Whether this test contact follows you, for “follows you” checks"
           >
             Follows you: {follows ? 'yes' : 'no'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={busy}
+            onClick={() => act('/simulator/story-mention')}
+            title="Mention your account in a story, to test story mention triggers"
+          >
+            Mention you in a story
           </button>
           <button
             type="button"
@@ -170,24 +187,35 @@ export function Simulator({ flowId, showState = true }: { flowId?: string; showS
         </div>
 
         <form onSubmit={send} className="flex gap-2 border-t-2 border-edge p-2.5">
-          <button
-            type="button"
-            className={`btn btn-sm shrink-0 ${asComment ? 'bg-surface-2 shadow-hard-sm' : ''}`}
-            aria-pressed={asComment}
-            onClick={() => setAsComment((c) => !c)}
-            title="Send as a public comment on a post, to test comment triggers"
+          <label htmlFor="sim-mode" className="sr-only">
+            Send as
+          </label>
+          <select
+            id="sim-mode"
+            className="input w-auto shrink-0 pr-8 pl-2 text-[14px]"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as typeof mode)}
+            title="Send as a DM, a comment on a post, or a reply to your story"
           >
-            {asComment ? '💬 Comment' : 'DM'}
-          </button>
+            <option value="dm">DM</option>
+            <option value="comment">Comment</option>
+            <option value="story">Story reply</option>
+          </select>
           <label htmlFor="sim-input" className="sr-only">
-            {asComment ? 'Comment' : 'Message'}
+            {mode === 'comment' ? 'Comment' : mode === 'story' ? 'Story reply' : 'Message'}
           </label>
           <input
             id="sim-input"
             className="input"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={asComment ? 'Comment on a post…' : 'Type a message…'}
+            placeholder={
+              mode === 'comment'
+                ? 'Comment on a post…'
+                : mode === 'story'
+                  ? 'Reply to your story…'
+                  : 'Type a message…'
+            }
             autoComplete="off"
             maxLength={2000}
           />
@@ -274,10 +302,16 @@ function Bubble({
     const c = m.content;
     return (
       <div className="bubble bubble-me">
-        {c.comment && (
-          <span className="mb-1 block text-label uppercase text-muted">Public comment</span>
+        {(c.comment || c.story) && (
+          <span className="mb-1 block text-label uppercase text-muted">
+            {c.comment
+              ? 'Public comment'
+              : c.story?.kind === 'reply'
+                ? 'Story reply'
+                : 'Mentioned you in their story'}
+          </span>
         )}
-        {c.text ?? (c.ref ? `Opened a link (ref=${c.ref})` : 'Tapped a button')}
+        {c.text ?? (c.ref ? `Opened a link (ref=${c.ref})` : c.story ? '' : 'Tapped a button')}
       </div>
     );
   }

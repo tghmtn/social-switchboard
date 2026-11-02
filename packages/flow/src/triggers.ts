@@ -32,13 +32,39 @@ export const triggerConfig = z.discriminatedUnion('type', [
     /** Optional public replies under the comment; one is picked at random. */
     publicReplies: z.array(z.string().trim().min(1).max(300)).max(10).default([]),
   }),
+  /** A reply to one of the account's stories (Instagram). It arrives as a DM, so the window is open. */
+  z.object({
+    type: z.literal('story_reply'),
+    /** Empty: any reply. */
+    keywords: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+    match: z.enum(['exact', 'contains', 'starts_with']).default('contains'),
+    /** Empty: any story. Stories last a day, so a picked one stops getting replies when it's gone. */
+    storyIds: z
+      .array(z.string().regex(/^[0-9A-Za-z_]{1,64}$/))
+      .max(50)
+      .default([]),
+  }),
+  /** Someone mentions the account in their own story (Instagram). */
+  z.object({ type: z.literal('story_mention') }),
 ]);
 
 export type TriggerConfig = z.infer<typeof triggerConfig>;
 export type TriggerType = TriggerConfig['type'];
 
-export type TriggerEvent = { channel: string; text?: string; ref?: string; isNewContact: boolean };
+export type TriggerEvent = {
+  channel: string;
+  text?: string;
+  ref?: string;
+  /** A reply to one of the account's stories, or a mention in theirs. */
+  story?: StoryEvent;
+  isNewContact: boolean;
+};
+export type StoryEvent = { kind: 'reply' | 'mention'; id?: string };
 type Matchable = { config: TriggerConfig; channels?: string[] | null };
+
+/** Whether a trigger listens on this channel. Test chat stands in for every channel. */
+const listensOn = (t: Matchable, channel: string) =>
+  !t.channels?.length || channel === 'simulator' || t.channels.includes(channel);
 
 // Ignore case, extra spaces and surrounding punctuation, so "Workshop!" matches "WORKSHOP".
 const EDGES = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
@@ -71,22 +97,35 @@ export function keywordMatches(
 }
 
 /**
- * Picks the trigger for an incoming event. Order: ref link, then keywords (in the order
- * given), then welcome for new contacts, then the default reply.
+ * Picks the trigger for an incoming event. Order: ref link, story mention, story reply, then
+ * keywords (in the order given), then welcome for new contacts, then the default reply. A story
+ * reply no story trigger takes is an ordinary DM, so keyword triggers still catch it.
  */
 export function matchTrigger<T extends Matchable>(
   triggers: T[],
   event: TriggerEvent,
 ): T | undefined {
-  const eligible = triggers.filter(
-    (t) => !t.channels?.length || t.channels.includes(event.channel),
-  );
+  const eligible = triggers.filter((t) => listensOn(t, event.channel));
   const ofType = <K extends TriggerType>(type: K) =>
     eligible.filter(
       (t): t is T & { config: Extract<TriggerConfig, { type: K }> } => t.config.type === type,
     );
 
   if (event.ref !== undefined) return ofType('ref').find((t) => t.config.ref === event.ref);
+  if (event.story?.kind === 'mention') return ofType('story_mention')[0];
+  const story = event.story;
+  if (story?.kind === 'reply') {
+    // Like comments: triggers on this very story first, then "any story" ones. No keywords
+    // means any reply, a photo or sticker with no words included.
+    const replies = ofType('story_reply');
+    const fits = (c: Extract<TriggerConfig, { type: 'story_reply' }>) =>
+      c.keywords.length === 0 || (event.text !== undefined && keywordMatches(c, event.text));
+    const found =
+      replies.find(
+        (t) => story.id !== undefined && t.config.storyIds.includes(story.id) && fits(t.config),
+      ) ?? replies.find((t) => t.config.storyIds.length === 0 && fits(t.config));
+    if (found) return found;
+  }
   if (event.text === undefined) return undefined;
 
   const text = event.text;
@@ -110,6 +149,7 @@ export function triggerOverlap(a: Matchable, b: Matchable): string | undefined {
   if (x.type === 'default_reply' && y.type === 'default_reply')
     return 'messages nothing else answers';
   if (x.type === 'ref' && y.type === 'ref') return x.ref === y.ref ? `ref=${x.ref}` : undefined;
+  if (x.type === 'story_mention' && y.type === 'story_mention') return 'story mentions';
   const words = (k: string[]) => new Set(k.map(normalizeText));
   if (x.type === 'keyword' && y.type === 'keyword') {
     const theirs = words(y.keywords);
@@ -123,6 +163,14 @@ export function triggerOverlap(a: Matchable, b: Matchable): string | undefined {
     const theirs = words(y.keywords);
     const shared = x.keywords.find((k) => theirs.has(normalizeText(k)));
     return shared === undefined ? undefined : `comments with “${shared}”`;
+  }
+  if (x.type === 'story_reply' && y.type === 'story_reply') {
+    if (x.storyIds.length && y.storyIds.length && !x.storyIds.some((m) => y.storyIds.includes(m)))
+      return undefined;
+    if (!x.keywords.length || !y.keywords.length) return 'any story reply';
+    const theirs = words(y.keywords);
+    const shared = x.keywords.find((k) => theirs.has(normalizeText(k)));
+    return shared === undefined ? undefined : `story replies with “${shared}”`;
   }
   return undefined;
 }
@@ -139,7 +187,7 @@ export function matchCommentTrigger<T extends Matchable>(
 ): T | undefined {
   const candidates = triggers.filter(
     (t): t is T & { config: Extract<TriggerConfig, { type: 'comment' }> } =>
-      t.config.type === 'comment' && (!t.channels?.length || t.channels.includes(event.channel)),
+      t.config.type === 'comment' && listensOn(t, event.channel),
   );
   const matchesText = (c: Extract<TriggerConfig, { type: 'comment' }>) =>
     c.keywords.length === 0 || keywordMatches(c, event.text);
