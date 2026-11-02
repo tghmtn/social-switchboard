@@ -254,23 +254,57 @@ export const STARTERS: Starter[] = [
   },
   {
     key: 'welcome',
-    name: 'Welcome message',
-    description: 'Greet new people, point them to answers, and hand off to a person when they ask.',
+    name: 'New follower greeting',
+    description:
+      'The first time someone DMs you, thank them for following, or invite them to follow if they don’t yet. Then point them to answers or a person.',
     trigger: { type: 'welcome' },
     graph: {
       nodes: [
         { id: 'start', type: 'start', position: at(0) },
         {
-          id: 'greet',
-          type: 'message',
+          // A DM lets Instagram say whether they follow, so this check is fresh on their first message.
+          id: 'check',
+          type: 'condition',
           position: at(1),
+          data: {
+            cases: [{ id: 'follows', match: 'all', rules: [{ subject: 'follows', op: 'yes' }] }],
+          },
+        },
+        {
+          id: 'thanks',
+          type: 'message',
+          position: at(2),
+          data: {
+            parts: [{ type: 'text', text: 'Hi {{first_name | there}}, thanks for following! 💛' }],
+          },
+        },
+        {
+          id: 'invite',
+          type: 'message',
+          position: at(2, 1),
           data: {
             parts: [
               {
                 type: 'text',
-                text: 'Hi {{first_name | there}}, thanks for reaching out! How can we help?',
+                text: 'Hi {{first_name | there}}, thanks for reaching out! 💛 Follow me so you never miss a post.',
               },
             ],
+            buttons: [
+              {
+                id: 'btn_follow',
+                kind: 'url',
+                label: 'Follow me',
+                url: `https://www.instagram.com/${HANDLE_PLACEHOLDER}`,
+              },
+            ],
+          },
+        },
+        {
+          id: 'greet',
+          type: 'message',
+          position: at(3),
+          data: {
+            parts: [{ type: 'text', text: 'How can I help?' }],
             quickReplies: [
               { id: 'qr_pricing', label: 'Pricing' },
               { id: 'qr_person', label: 'Talk to a person' },
@@ -280,7 +314,7 @@ export const STARTERS: Starter[] = [
         {
           id: 'pricing',
           type: 'message',
-          position: at(2),
+          position: at(4),
           data: {
             parts: [{ type: 'text', text: 'Here’s everything on pricing 👇' }],
             buttons: [
@@ -296,17 +330,15 @@ export const STARTERS: Starter[] = [
         {
           id: 'reassure',
           type: 'message',
-          position: at(2, 1),
+          position: at(4, 1),
           data: {
-            parts: [
-              { type: 'text', text: 'Got it. Someone from the team will reply right here soon.' },
-            ],
+            parts: [{ type: 'text', text: 'Got it. I’ll reply right here as soon as I can.' }],
           },
         },
         {
           id: 'alert_team',
           type: 'action',
-          position: at(3, 1),
+          position: at(5, 1),
           data: {
             actions: [
               {
@@ -319,12 +351,16 @@ export const STARTERS: Starter[] = [
         {
           id: 'to_human',
           type: 'handoff',
-          position: at(4, 1),
+          position: at(6, 1),
           data: { note: 'Asked to talk to a person' },
         },
       ],
       edges: [
-        edge('start', 'next', 'greet'),
+        edge('start', 'next', 'check'),
+        edge('check', 'follows', 'thanks'),
+        edge('check', 'else', 'invite'),
+        edge('thanks', 'next', 'greet'),
+        edge('invite', 'next', 'greet'),
         edge('greet', 'qr_pricing', 'pricing'),
         edge('greet', 'qr_person', 'reassure'),
         edge('reassure', 'next', 'alert_team'),

@@ -263,14 +263,34 @@ describe.skipIf(!databaseUrl)('flows, contacts and the simulator', () => {
     expect(outText(s)).toEqual(['Time’s up']);
   });
 
+  it('greets a first message, inviting someone who doesn’t follow yet to follow', async () => {
+    const flowId = await createFlow('New follower greeting', 'welcome');
+    await call('POST', `/api/flows/${flowId}/publish`);
+
+    let s = (await call<SimState>('POST', '/api/simulator/send', { text: 'hi!' })).body;
+    expect(outText(s)).toEqual([
+      'Hi Ada, thanks for reaching out! 💛 Follow me so you never miss a post.',
+      'How can I help?',
+    ]);
+
+    // A follower gets thanked instead, even with the switch flipped before their first message.
+    await call('POST', '/api/simulator/reset');
+    await call('POST', '/api/simulator/follows', { follows: true });
+    s = (await call<SimState>('POST', '/api/simulator/send', { text: 'hi!' })).body;
+    expect(outText(s)).toEqual(['Hi Ada, thanks for following! 💛', 'How can I help?']);
+    // Not new once they've written: the next message doesn't greet them again.
+    s = (await call<SimState>('POST', '/api/simulator/send', { text: 'hello?' })).body;
+    expect(outText(s)).toHaveLength(2);
+  });
+
   it('hands off to a person and stays quiet until resumed', async () => {
     const flowId = await createFlow('Welcome', 'welcome');
     await call('POST', `/api/flows/${flowId}/publish`);
 
     let s = (await call<SimState>('POST', '/api/simulator/send', { text: 'hello there' })).body;
-    expect(outText(s).at(-1)).toMatch(/How can we help/);
+    expect(outText(s).at(-1)).toMatch(/How can I help/);
     s = (await call<SimState>('POST', '/api/simulator/send', { text: 'talk to a person' })).body;
-    expect(outText(s).at(-1)).toMatch(/Someone from the team/);
+    expect(outText(s).at(-1)).toMatch(/I’ll reply right here/);
     expect(s.contact?.automationPausedAt).not.toBeNull();
 
     const before = outText(s).length;

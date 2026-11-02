@@ -101,9 +101,10 @@ describe.skipIf(!databaseUrl)('web chat', () => {
     // A first message: the welcome flow answers, with its quick replies but none of its payloads.
     const token = 'visitor-token-0123456789abcdefghijklmn';
     let r = await visitor(`/api/webchat/${key}/send`, { token, text: 'hello' });
-    expect(r.body.messages.map((m) => m.from)).toEqual(['visitor', 'us']);
-    const greet = r.body.messages[1] as ChatMessage;
-    expect(greet.parts?.[0]?.text).toMatch(/How can we help/);
+    expect(r.body.messages.map((m) => m.from)).toEqual(['visitor', 'us', 'us']);
+    expect(r.body.messages[1]?.buttons?.[0]).toMatchObject({ label: 'Follow me' });
+    const greet = r.body.messages[2] as ChatMessage;
+    expect(greet.parts?.[0]?.text).toMatch(/How can I help/);
     expect(greet.quickReplies?.map((q) => q.label)).toEqual(['Pricing', 'Talk to a person']);
     expect(greet).not.toHaveProperty('payloads');
 

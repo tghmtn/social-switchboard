@@ -151,6 +151,15 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
       { ...input.profile, accountRef: input.accountRef },
     );
     await lockContact(tx, contactId);
+    // New until anything has passed between you, even if the contact was made first (Test
+    // chat's "Follows you" switch makes one before the first message).
+    const [earlier] = isNew
+      ? []
+      : await tx
+          .select({ id: messages.id })
+          .from(messages)
+          .where(eq(messages.contactId, contactId))
+          .limit(1);
     const now = deps.now?.() ?? new Date();
     const [contact] = await tx
       .update(contacts)
@@ -189,7 +198,7 @@ export async function receive(deps: RuntimeDeps, input: Inbound) {
       notices,
       aiJobs,
     );
-    await route(ctx, input, isNew);
+    await route(ctx, input, !earlier);
     return contactId;
   });
   await deliver(deps, queued);
